@@ -1,0 +1,367 @@
+* {
+  box-sizing: border-box;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+body {
+  margin: 0;
+  background: #121212;
+  color: #f5f5f5;
+}
+
+.app-container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 16px;
+}
+
+header {
+  margin-bottom: 16px;
+}
+
+.header-main {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+header h1 {
+  margin: 0;
+  font-size: 28px;
+}
+
+header p {
+  margin: 4px 0 0;
+  color: #bbbbbb;
+}
+
+.user-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+main {
+  display: grid;
+  grid-template-columns: 1.1fr 1.2fr 1fr;
+  grid-template-rows: auto auto;
+  gap: 12px;
+}
+
+/* Panels */
+
+.panel {
+  background: #1e1e1e;
+  border-radius: 12px;
+  padding: 12px 14px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+}
+
+.panel h2 {
+  margin-top: 0;
+  font-size: 18px;
+  margin-bottom: 12px;
+}
+
+.panel-stats {
+  grid-column: 1 / span 3;
+}
+
+/* 任務列表 */
+
+.filters {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.filter-btn {
+  flex: 1;
+  padding: 6px 4px;
+  border-radius: 999px;
+  border: none;
+  cursor: pointer;
+  background: #2c2c2c;
+  color: #f5f5f5;
+  font-size: 12px;
+}
+
+.filter-btn.active {
+  background: #00b894;
+}
+
+.task-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+/* 任務卡片 */
+
+.task-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  border-radius: 8px;
+  background: #252525;
+  margin-bottom: 6px;
+  border: 1px solid transparent;
+}
+
+.task-item.todo {
+  border-color: #555555;
+}
+
+.task-item.done {
+  border-color: #00b894;
+  opacity: 0.85;
+}
+
+.task-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.task-main input[type="checkbox"] {
+  transform: scale(1.1);
+}
+
+.task-title {
+  font-weight: 600;
+}
+
+.task-title.done {
+  text-decoration: line-through;
+  color: #aaaaaa;
+}
+
+.task-meta {
+  font-size: 11px;
+  color: #bbbbbb;
+  display: flex;
+  justify-content: space-between;
+}
+
+/* actions */
+
+.task-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.task-actions button {
+  flex: 1;
+  font-size: 11px;
+  padding: 3px 0;
+  border-radius: 999px;
+  border: none;
+  cursor: pointer;
+}
+
+.btn-small {
+  font-size: 11px;
+}
+
+/* 表單 */
+
+#taskForm label {
+  display: block;
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+
+#taskForm input[type="text"],
+#taskForm input[type="date"],
+#taskForm textarea,
+#taskForm select,
+#focusMinutesInput,
+#breakMinutesInput {
+  width: 100%;
+  padding: 6px;
+  border-radius: 6px;
+  border: 1px solid #444;
+  background: #121212;
+  color: #f5f5f5;
+  margin-top: 2px;
+}
+
+#taskForm textarea {
+  resize: vertical;
+}
+
+.form-actions {
+  margin-top: 8px;
+  display: flex;
+  gap: 6px;
+}
+
+button {
+  background: #00b894;
+  color: #121212;
+  border-radius: 8px;
+  border: none;
+  padding: 6px 10px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+button.secondary {
+  background: #333333;
+  color: #f5f5f5;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* localstorage 區塊 */
+
+.localstorage-actions {
+  margin-top: 16px;
+  border-top: 1px solid #333333;
+  padding-top: 10px;
+}
+
+.import-label {
+  display: inline-block;
+  background: #333333;
+  padding: 6px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  margin-left: 6px;
+}
+
+/* 番茄鐘 */
+
+.current-task {
+  background: #252525;
+  border-radius: 8px;
+  padding: 8px;
+  margin-bottom: 10px;
+  font-size: 13px;
+}
+
+.timer-display {
+  text-align: center;
+  margin-bottom: 10px;
+}
+
+#timerModeLabel {
+  font-size: 13px;
+  color: #bbbbbb;
+}
+
+#timerValue {
+  font-size: 32px;
+  font-weight: 700;
+  margin-top: 4px;
+}
+
+.timer-controls {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.timer-controls button {
+  flex: 1;
+}
+
+.timer-settings label {
+  display: block;
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+
+/* 今日統計 */
+
+.panel-stats p {
+  margin: 0;
+  font-size: 14px;
+}
+
+/* Sortable.js 拖曳效果 */
+
+.drag-ghost {
+  opacity: 0.5;
+  background: #34495e !important;
+}
+
+/* ===== Auth Modal ===== */
+
+.modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 999;
+}
+
+.modal.hidden {
+  display: none;
+}
+
+.modal-content {
+  background: #1e1e1e;
+  padding: 16px 18px;
+  border-radius: 12px;
+  width: 320px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.7);
+}
+
+.modal-content h2 {
+  margin-top: 0;
+  margin-bottom: 12px;
+  font-size: 18px;
+}
+
+.modal-content label {
+  display: block;
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+.modal-content input[type="text"],
+.modal-content input[type="email"],
+.modal-content input[type="password"] {
+  width: 100%;
+  padding: 6px;
+  margin-top: 2px;
+  border-radius: 6px;
+  border: 1px solid #444;
+  background: #121212;
+  color: #f5f5f5;
+}
+
+.modal-actions {
+  margin-top: 10px;
+  display: flex;
+  gap: 8px;
+}
+
+.modal-toggle-text {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #bbbbbb;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.link-button {
+  background: transparent;
+  border: none;
+  color: #00b894;
+  padding: 0;
+  cursor: pointer;
+  font-size: 12px;
+}
