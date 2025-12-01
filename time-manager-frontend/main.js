@@ -4,7 +4,7 @@ const LS_USER_CACHE_KEY = "timeManager_user_cache_v1";
 const LS_AUTH_KEY = "timeManager_auth_v1";
 
 // 後端 API base URL
-const API_BASE = "http://localhost:4000";
+const API_BASE = "https://big-plan.onrender.com";
 
 // mode: "guest" 或 "user"
 let authState = {
