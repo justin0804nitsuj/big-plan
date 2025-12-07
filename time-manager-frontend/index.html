@@ -20,7 +20,7 @@
         <div class="user-bar">
           <span id="authStatusLabel">Guest 模式</span>
           <button id="authActionBtn">登入 / 建立帳號</button>
-          <button id="openSettingsBtn" class="secondary small">⚙ 設定</button>
+          <button id="openSettingsBtn">⚙ 設定</button>
         </div>
       </div>
     </header>
@@ -188,6 +188,31 @@
   <!-- Sortable.js -->
   <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
 
+  <div id="settingsDrawer">
+  <h2>帳號設定</h2>
+
+  <div class="settings-row">
+    <span>Email：</span>
+    <div id="settingsUserEmail"></div>
+  </div>
+
+  <div class="settings-row">
+    <span>名稱：</span>
+    <div id="settingsUserName"></div>
+  </div>
+
+  <button id="changeNameBtn">修改名稱</button>
+
+  <label>
+    修改密碼
+    <input type="password" id="newPasswordInput" placeholder="新密碼" />
+  </label>
+  <button id="changePasswordBtn">更新密碼</button>
+
+  <button id="deleteAccountBtn" class="danger">刪除帳號</button>
+
+  <button id="closeSettingsBtn" class="secondary" style="margin-top:20px;width:100%">關閉</button>
+</div>
   <!-- Main JS -->
   <script src="main.js"></script>
 </body>

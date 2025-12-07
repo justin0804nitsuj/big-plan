@@ -771,11 +771,12 @@ document.getElementById("deleteAccountBtn").onclick = async () => {
 ====================================================== */
 function updateAuthUI() {
   if (authState.mode === "user") {
-    authStatusLabelEl.textContent = `${authState.user.name}（登入中）`;
-    authActionBtnEl.textContent = "登出";
-  } else {
-    authStatusLabelEl.textContent = "Guest 模式";
-    authActionBtnEl.textContent = "登入 / 建立帳號";
+  settingsUserEmailEl.textContent = authState.user.email;
+  settingsUserNameEl.textContent = authState.user.name;
+  }
+  else {
+  settingsUserEmailEl.textContent = "";
+  settingsUserNameEl.textContent = "";
   }
 }
 
