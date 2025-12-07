@@ -36,6 +36,8 @@ let timerState = {
   timerId: null,
 };
 
+let weeklyChart = null;
+
 /* ======================================================
    Utils
 ====================================================== */
@@ -159,7 +161,7 @@ function scheduleSaveDataToServer() {
         body: JSON.stringify(appData),
       });
     } catch (e) {
-      showToast("雲端同步失敗");
+      console.warn("雲端同步失敗", e);
     }
   }, 500);
 }
@@ -173,9 +175,13 @@ function saveData() {
 }
 
 /* ======================================================
-   Task Rendering
+   Task Rendering + Subtasks
 ====================================================== */
 const taskListEl = document.getElementById("taskList");
+
+function getSubtasksFor(task) {
+  return Array.isArray(task.subtasks) ? task.subtasks : [];
+}
 
 function renderTaskList() {
   taskListEl.innerHTML = "";
@@ -187,10 +193,17 @@ function renderTaskList() {
   });
 
   filtered.forEach((t) => {
+    const subtasks = getSubtasksFor(t);
+    const doneCount = subtasks.filter((s) => s.done).length;
+
     const li = document.createElement("li");
     li.className = "task-item";
     li.dataset.category = t.category || "";
+    li.dataset.taskId = t.id;
     if (t.status === "done") li.classList.add("done");
+
+    const subtaskSummary =
+      subtasks.length > 0 ? ` | 子任務：${doneCount} / ${subtasks.length}` : "";
 
     li.innerHTML = `
       <div class="task-main">
@@ -198,7 +211,9 @@ function renderTaskList() {
         <span class="task-title">${t.title}</span>
       </div>
 
-      <div class="task-meta">截止：${t.dueDate || "無"}　|　優先度：${t.priority}</div>
+      <div class="task-meta">
+        截止：${t.dueDate || "無"}　|　優先度：${t.priority}${subtaskSummary}
+      </div>
       <div class="task-meta">分類：${t.category || "無"}</div>
 
       <div class="task-actions">
@@ -232,6 +247,7 @@ function renderTaskList() {
   });
 
   renderTodayStats();
+  renderWeeklyChart();
 }
 
 function addTask(task) {
@@ -270,7 +286,7 @@ function setTaskDone(id, done) {
 }
 
 /* ======================================================
-   Task Form
+   Task Form (+ Subtasks Textarea)
 ====================================================== */
 const taskIdEl = document.getElementById("taskId");
 const taskTitleEl = document.getElementById("taskTitle");
@@ -278,6 +294,7 @@ const taskDescriptionEl = document.getElementById("taskDescription");
 const taskDueDateEl = document.getElementById("taskDueDate");
 const taskPriorityEl = document.getElementById("taskPriority");
 const taskCategoryEl = document.getElementById("taskCategory");
+const taskSubtasksEl = document.getElementById("taskSubtasks");
 
 document.getElementById("taskForm").addEventListener("submit", (e) => {
   e.preventDefault();
@@ -286,12 +303,24 @@ document.getElementById("taskForm").addEventListener("submit", (e) => {
   const title = taskTitleEl.value.trim();
   if (!title) return showToast("請輸入標題");
 
+  const lines = taskSubtasksEl.value
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+
+  const newSubtasks = lines.map((line) => ({
+    id: createId("st"),
+    title: line,
+    done: false,
+  }));
+
   const data = {
     title,
     description: taskDescriptionEl.value.trim(),
     dueDate: taskDueDateEl.value || "",
     priority: taskPriorityEl.value,
     category: taskCategoryEl.value,
+    subtasks: newSubtasks,
   };
 
   if (id) updateTask(id, data);
@@ -308,6 +337,9 @@ function fillFormForEdit(t) {
   taskDueDateEl.value = t.dueDate || "";
   taskPriorityEl.value = t.priority;
   taskCategoryEl.value = t.category || "";
+
+  const subtasks = getSubtasksFor(t);
+  taskSubtasksEl.value = subtasks.map((s) => s.title).join("\n");
 }
 
 function clearForm() {
@@ -317,12 +349,13 @@ function clearForm() {
   taskDueDateEl.value = "";
   taskPriorityEl.value = "medium";
   taskCategoryEl.value = "";
+  taskSubtasksEl.value = "";
 }
 
 document.getElementById("clearFormBtn").onclick = clearForm;
 
 /* ======================================================
-   今日統計
+   今日統計 + 週完成度 Chart.js
 ====================================================== */
 function renderTodayStats() {
   const today = new Date().toISOString().slice(0, 10);
@@ -331,6 +364,58 @@ function renderTodayStats() {
 
   if (!stats || stats.total === 0) statEl.textContent = "今日尚無任務記錄";
   else statEl.textContent = `完成 ${stats.done} / ${stats.total}`;
+}
+
+// 週完成度：最近 7 天，每天完成率（0~100）
+function renderWeeklyChart() {
+  const canvas = document.getElementById("weeklyChart");
+  if (!canvas || !window.Chart) return;
+
+  const ctx = canvas.getContext("2d");
+  const labels = [];
+  const data = [];
+
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    const dateStr = d.toISOString().slice(0, 10); // YYYY-MM-DD
+    labels.push(dateStr.slice(5)); // MM-DD
+
+    const tasksOfDay = appData.tasks.filter((t) => t.dueDate === dateStr);
+    const total = tasksOfDay.length;
+    const done = tasksOfDay.filter((t) => t.status === "done").length;
+    const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+    data.push(pct);
+  }
+
+  if (weeklyChart) {
+    weeklyChart.data.labels = labels;
+    weeklyChart.data.datasets[0].data = data;
+    weeklyChart.update();
+  } else {
+    weeklyChart = new Chart(ctx, {
+      type: "bar",
+      data: {
+        labels,
+        datasets: [
+          {
+            label: "完成度 (%)",
+            data,
+            borderWidth: 1,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        scales: {
+          y: {
+            beginAtZero: true,
+            max: 100,
+          },
+        },
+      },
+    });
+  }
 }
 
 /* ======================================================
@@ -391,7 +476,6 @@ function resetTimer() {
 function handleTimerFinished() {
   pauseTimer();
 
-  // 記錄
   appData.pomodoroHistory.push({
     id: createId("p"),
     taskId: currentTaskIdForPomodoro,
@@ -460,7 +544,6 @@ document.getElementById("importJsonInput").onchange = (e) => {
       saveData();
       afterDataLoaded();
       showToast("匯入成功");
-
     } catch {
       showToast("匯入失敗：格式錯誤");
     }
@@ -627,8 +710,8 @@ document.getElementById("changeNameBtn").onclick = async () => {
   if (!newName) return;
 
   try {
-    const data = await apiRequest("/auth/update-name", {
-      method: "POST",
+    const data = await apiRequest("/auth/change-name", {
+      method: "PATCH",
       headers: { Authorization: `Bearer ${authState.token}` },
       body: JSON.stringify({ name: newName }),
     });
@@ -638,7 +721,6 @@ document.getElementById("changeNameBtn").onclick = async () => {
     settingsUserNameEl.textContent = newName;
     updateAuthUI();
     showToast("名稱已更新");
-
   } catch (err) {
     showToast("更新失敗：" + err.message);
   }
@@ -649,15 +731,14 @@ document.getElementById("changePasswordBtn").onclick = async () => {
   if (!newPassword) return showToast("請輸入新密碼");
 
   try {
-    await apiRequest("/auth/update-password", {
-      method: "POST",
+    await apiRequest("/auth/change-password", {
+      method: "PATCH",
       headers: { Authorization: `Bearer ${authState.token}` },
-      body: JSON.stringify({ password: newPassword }),
+      body: JSON.stringify({ newPassword }),
     });
 
     showToast("密碼已更新");
     document.getElementById("newPasswordInput").value = "";
-
   } catch (err) {
     showToast("更新失敗：" + err.message);
   }
@@ -680,7 +761,6 @@ document.getElementById("deleteAccountBtn").onclick = async () => {
     afterDataLoaded();
     updateAuthUI();
     settingsDrawerEl.classList.remove("open");
-
   } catch (err) {
     showToast("刪除失敗：" + err.message);
   }
