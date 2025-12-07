@@ -5,50 +5,52 @@
   <title>Personal Time Manager</title>
   <link rel="stylesheet" href="style.css" />
 </head>
+
 <body>
   <div class="app-container">
 
-    <!-- =================== Header =================== -->
+    <!-- ================= Header ================= -->
     <header>
       <div class="header-main">
         <div>
           <h1>Personal Time Manager</h1>
-          <p>任務管理 + 番茄鐘（支援 Guest 模式 + 帳號登入 + 雲端同步）</p>
+          <p>任務管理 + 番茄鐘（支援 Guest / Login / 雲端同步）</p>
         </div>
 
         <div class="user-bar">
           <span id="authStatusLabel">Guest 模式</span>
           <button id="authActionBtn">登入 / 建立帳號</button>
-
-          <!-- NEW: 設定按鈕 -->
           <button id="openSettingsBtn" class="secondary small">⚙ 設定</button>
         </div>
       </div>
     </header>
 
-    <!-- =================== Main Content =================== -->
+    <!-- ================= Main ================= -->
     <main id="mainContent">
 
-      <!-- ========== 任務列表 ========== -->
+      <!-- ===== 任務列表 ===== -->
       <section class="panel panel-tasks-list">
         <h2>任務列表</h2>
+
         <div class="filters">
           <button data-filter="all" class="filter-btn active">全部</button>
           <button data-filter="todo" class="filter-btn">未完成</button>
           <button data-filter="done" class="filter-btn">已完成</button>
         </div>
+
         <ul id="taskList" class="task-list"></ul>
       </section>
 
-      <!-- ========== 任務表單 ========== -->
+      <!-- ===== 任務表單 ===== -->
       <section class="panel panel-task-form">
         <h2>新增 / 編輯任務</h2>
+
         <form id="taskForm">
           <input type="hidden" id="taskId" />
 
           <label>標題 <input type="text" id="taskTitle" required /></label>
 
-          <label>描述 <textarea id="taskDescription"></textarea></label>
+          <label>描述 <textarea id="taskDescription" rows="3"></textarea></label>
 
           <label>截止日期 <input type="date" id="taskDueDate" /></label>
 
@@ -79,9 +81,10 @@
           </div>
         </form>
 
-        <div>
+        <div class="localstorage-actions">
           <h3>資料備份</h3>
           <button id="exportJsonBtn">匯出 JSON</button>
+
           <label class="import-label">
             匯入 JSON
             <input type="file" id="importJsonInput" accept=".json" hidden />
@@ -89,58 +92,103 @@
         </div>
       </section>
 
-      <!-- ========== 番茄鐘 ========== -->
+      <!-- ===== 番茄鐘 ===== -->
       <section class="panel panel-pomodoro">
         <h2>番茄鐘</h2>
-        <p id="currentTaskLabel">尚未選擇任務</p>
-        <div id="timerValue">25:00</div>
 
-        <button id="startTimerBtn">Start</button>
-        <button id="pauseTimerBtn" class="secondary">Pause</button>
-        <button id="resetTimerBtn" class="secondary">Reset</button>
+        <div class="current-task">
+          <h3>目前專注任務：</h3>
+          <p id="currentTaskLabel">尚未選擇任務</p>
+        </div>
 
-        <h3>設定</h3>
-        <label>專注 <input id="focusMinutesInput" type="number" value="25" /></label>
-        <label>休息 <input id="breakMinutesInput" type="number" value="5" /></label>
-        <button id="saveSettingsBtn">儲存設定</button>
+        <div class="timer-display">
+          <span id="timerModeLabel">專注時間</span>
+          <div id="timerValue">25:00</div>
+        </div>
+
+        <div class="timer-controls">
+          <button id="startTimerBtn">Start</button>
+          <button id="pauseTimerBtn" class="secondary">Pause</button>
+          <button id="resetTimerBtn" class="secondary">Reset</button>
+        </div>
+
+        <div class="timer-settings">
+          <h3>設定</h3>
+          <label>
+            專注分鐘 <input type="number" id="focusMinutesInput" min="1" value="25" />
+          </label>
+          <label>
+            休息分鐘 <input type="number" id="breakMinutesInput" min="1" value="5" />
+          </label>
+          <button id="saveSettingsBtn">儲存設定</button>
+        </div>
       </section>
 
-      <!-- ========== 今日統計 ========== -->
+      <!-- ===== 今日完成度 ===== -->
       <section class="panel panel-stats">
         <h2>今日完成度統計</h2>
         <p id="todayStatsLabel">今日尚無任務記錄</p>
       </section>
 
     </main>
-
-    <!-- =================== Settings Panel =================== -->
-    <div id="settingsPanel" class="settings-panel hidden">
-      <h2>設定</h2>
-
-      <div class="setting-group">
-        <h3>帳號資訊</h3>
-        <p>目前登入：<span id="settingsUserEmail">-</span></p>
-        <p>名稱：<span id="settingsUserName">-</span></p>
-        <button id="changeNameBtn">修改名稱</button>
-      </div>
-
-      <div class="setting-group">
-        <h3>修改密碼</h3>
-        <label>新密碼 <input type="password" id="newPasswordInput"></label>
-        <button id="changePasswordBtn">更新密碼</button>
-      </div>
-
-      <div class="setting-group danger-zone">
-        <h3>危險區域</h3>
-        <button id="deleteAccountBtn" class="danger">刪除帳號</button>
-      </div>
-
-      <button id="closeSettingsBtn" class="secondary">返回</button>
-    </div>
-
   </div>
 
+  <!-- ================= Auth Modal ================= -->
+  <div id="authModal" class="modal hidden">
+    <div class="modal-content glass">
+      <h2 id="authModalTitle">登入</h2>
+
+      <label id="authNameGroup">
+        名稱
+        <input type="text" id="authNameInput" />
+      </label>
+
+      <label>Email <input type="email" id="authEmailInput" /></label>
+
+      <label>密碼 <input type="password" id="authPasswordInput" /></label>
+
+      <div class="modal-actions">
+        <button id="authSubmitBtn">登入</button>
+        <button id="authCancelBtn" class="secondary">取消</button>
+      </div>
+
+      <p class="modal-toggle-text">
+        <span id="authToggleLabel">還沒有帳號？</span>
+        <button id="authToggleBtn" class="link-button">建立帳號</button>
+      </p>
+    </div>
+  </div>
+
+  <!-- ================= Settings Drawer ================= -->
+  <div id="settingsDrawer" class="settings-drawer hidden">
+    <div class="settings-header">
+      <h2>設定</h2>
+      <button id="closeSettingsBtn" class="secondary small">✕</button>
+    </div>
+
+    <div class="setting-section">
+      <h3>帳號資訊</h3>
+      <p>Email：<span id="settingsUserEmail">-</span></p>
+      <p>名稱：<span id="settingsUserName">-</span></p>
+      <button id="changeNameBtn">修改名稱</button>
+    </div>
+
+    <div class="setting-section">
+      <h3>修改密碼</h3>
+      <label>新密碼 <input id="newPasswordInput" type="password" /></label>
+      <button id="changePasswordBtn">更新密碼</button>
+    </div>
+
+    <div class="setting-section danger-zone">
+      <h3>危險區域</h3>
+      <button id="deleteAccountBtn" class="danger">刪除帳號</button>
+    </div>
+  </div>
+
+  <!-- Sortable.js -->
   <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
+
+  <!-- Main JS -->
   <script src="main.js"></script>
 </body>
 </html>
