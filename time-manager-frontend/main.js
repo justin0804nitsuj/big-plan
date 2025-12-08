@@ -36,6 +36,8 @@ let timerState = {
   timerId: null,
 };
 
+let sortableInitialized = false;
+
 /* ======================================================
    Utils
 ====================================================== */
@@ -50,7 +52,6 @@ function showToast(message) {
   toast.textContent = message;
   document.body.appendChild(toast);
 
-  // 觸發動畫
   requestAnimationFrame(() => {
     toast.classList.add("show");
   });
@@ -294,15 +295,13 @@ function renderTaskList() {
 
     const editBtn = document.createElement("button");
     editBtn.textContent = "編輯";
-    editBtn.classList.add("small");
 
     const bindBtn = document.createElement("button");
     bindBtn.textContent = "綁定番茄鐘";
-    bindBtn.classList.add("small");
 
     const delBtn = document.createElement("button");
     delBtn.textContent = "刪除";
-    delBtn.classList.add("small", "danger");
+    delBtn.classList.add("danger");
 
     actions.appendChild(editBtn);
     actions.appendChild(bindBtn);
@@ -437,6 +436,43 @@ filterButtons.forEach((btn) => {
     renderTaskList();
   });
 });
+
+/* ======================================================
+   Sortable (拖曳排序)
+====================================================== */
+function initSortable() {
+  if (sortableInitialized) return;
+  if (!window.Sortable) return;
+
+  new Sortable(taskListEl, {
+    animation: 150,
+    ghostClass: "drag-ghost",
+    onSort: function () {
+      const newOrder = [...taskListEl.children].map((li) =>
+        li.getAttribute("data-task-id")
+      );
+      reorderTasks(newOrder);
+    },
+  });
+
+  sortableInitialized = true;
+}
+
+function reorderTasks(newOrder) {
+  const newTasks = [];
+  newOrder.forEach((id) => {
+    const t = appData.tasks.find((task) => task.id === id);
+    if (t) newTasks.push(t);
+  });
+
+  appData.tasks.forEach((t) => {
+    if (!newOrder.includes(t.id)) newTasks.push(t);
+  });
+
+  appData.tasks = newTasks;
+  saveData();
+  renderTaskList();
+}
 
 /* ======================================================
    Today Stats
@@ -667,7 +703,6 @@ async function registerWithEmailPassword(name, email, password) {
   };
   saveAuthState();
 
-  // 初次註冊，把本地資料上傳
   await apiRequest("/data/full", {
     method: "POST",
     headers: {
@@ -711,13 +746,11 @@ authSubmitBtnEl.addEventListener("click", async () => {
 /* Header 登入 / 登出按鈕 */
 authActionBtnEl.addEventListener("click", () => {
   if (authState.mode === "user") {
-    // 登出
     if (!confirm("確定要登出嗎？")) return;
 
     authState = { mode: "guest", user: null, token: null };
     saveAuthState();
 
-    // 回到 guest data
     appData = {
       tasks: [],
       pomodoroHistory: [],
@@ -741,8 +774,8 @@ openSettingsBtn.addEventListener("click", () => {
     showToast("請先登入帳號才能開啟設定");
     return;
   }
-  settingsUserEmailEl.textContent = authState.user.email;
-  settingsUserNameEl.textContent = authState.user.name;
+  settingsUserEmailEl.textContent = authState.user.email || "-";
+  settingsUserNameEl.textContent = authState.user.name || "-";
   settingsDrawerEl.classList.add("open");
 });
 
@@ -750,14 +783,22 @@ closeSettingsBtn.addEventListener("click", () => {
   settingsDrawerEl.classList.remove("open");
 });
 
-/* 修改名稱 */
+/* 修改名稱：用 prompt（避免需要新增 HTML 欄位） */
 changeNameBtn.addEventListener("click", async () => {
   if (authState.mode !== "user" || !authState.token) {
     showToast("請先登入帳號");
     return;
   }
-  const newName = prompt("請輸入新名稱：", authState.user?.name || "");
-  if (!newName) return;
+
+  const currentName = authState.user?.name || "";
+  const newNameRaw = prompt("請輸入新名稱：", currentName);
+  if (newNameRaw === null) return; // 使用者按取消
+
+  const newName = newNameRaw.trim();
+  if (!newName) {
+    showToast("名稱不能是空白");
+    return;
+  }
 
   try {
     const data = await apiRequest("/auth/update-name", {
@@ -770,7 +811,8 @@ changeNameBtn.addEventListener("click", async () => {
 
     authState.user = data.user;
     saveAuthState();
-    settingsUserNameEl.textContent = data.user.name;
+
+    settingsUserNameEl.textContent = data.user.name || "-";
     updateAuthUI();
     showToast("名稱已更新");
   } catch (err) {
@@ -859,7 +901,6 @@ function updateAuthUI() {
     authStatusLabelEl.textContent = `${authState.user.name}（登入中）`;
     authActionBtnEl.textContent = "登出";
 
-    // 同步設定 panel 顯示
     settingsUserEmailEl.textContent = authState.user.email || "-";
     settingsUserNameEl.textContent = authState.user.name || "-";
   } else {
@@ -886,6 +927,7 @@ function afterDataLoaded() {
 
   renderTaskList();
   updateCurrentTaskLabel();
+  initSortable();
 }
 
 /* 初始化 App */
