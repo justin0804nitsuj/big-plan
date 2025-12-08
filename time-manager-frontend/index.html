@@ -14,13 +14,13 @@
       <div class="header-main">
         <div>
           <h1>Personal Time Manager</h1>
-          <p>任務管理 + 番茄鐘（支援 Guest / Login / 雲端同步）</p>
+          <p>任務管理 + 番茄鐘（Guest / Login / 雲端同步）</p>
         </div>
 
         <div class="user-bar">
           <span id="authStatusLabel">Guest 模式</span>
-          <button id="authActionBtn">登入 / 建立帳號</button>
-          <button id="openSettingsBtn">⚙ 設定</button>
+          <button id="authActionBtn">登入 / 註冊</button>
+          <button id="openSettingsBtn" class="secondary small">⚙ 設定</button>
         </div>
       </div>
     </header>
@@ -54,8 +54,7 @@
 
           <label>截止日期 <input type="date" id="taskDueDate" /></label>
 
-          <label>
-            優先度
+          <label>優先度
             <select id="taskPriority">
               <option value="low">Low</option>
               <option value="medium" selected>Medium</option>
@@ -63,8 +62,7 @@
             </select>
           </label>
 
-          <label>
-            分類
+          <label>分類
             <select id="taskCategory">
               <option value="">無</option>
               <option value="school">School</option>
@@ -114,11 +112,11 @@
 
         <div class="timer-settings">
           <h3>設定</h3>
-          <label>
-            專注分鐘 <input type="number" id="focusMinutesInput" min="1" value="25" />
+          <label>專注（分鐘）
+            <input type="number" id="focusMinutesInput" min="1" value="25" />
           </label>
-          <label>
-            休息分鐘 <input type="number" id="breakMinutesInput" min="1" value="5" />
+          <label>休息（分鐘）
+            <input type="number" id="breakMinutesInput" min="1" value="5" />
           </label>
           <button id="saveSettingsBtn">儲存設定</button>
         </div>
@@ -135,7 +133,7 @@
 
   <!-- ================= Auth Modal ================= -->
   <div id="authModal" class="modal hidden">
-    <div class="modal-content glass">
+    <div class="modal-content">
       <h2 id="authModalTitle">登入</h2>
 
       <label id="authNameGroup">
@@ -143,9 +141,13 @@
         <input type="text" id="authNameInput" />
       </label>
 
-      <label>Email <input type="email" id="authEmailInput" /></label>
+      <label>Email
+        <input type="email" id="authEmailInput" />
+      </label>
 
-      <label>密碼 <input type="password" id="authPasswordInput" /></label>
+      <label>密碼
+        <input type="password" id="authPasswordInput" />
+      </label>
 
       <div class="modal-actions">
         <button id="authSubmitBtn">登入</button>
@@ -160,60 +162,32 @@
   </div>
 
   <!-- ================= Settings Drawer ================= -->
-  <div id="settingsDrawer" class="settings-drawer hidden">
-    <div class="settings-header">
-      <h2>設定</h2>
-      <button id="closeSettingsBtn" class="secondary small">✕</button>
-    </div>
-
-    <div class="setting-section">
-      <h3>帳號資訊</h3>
-      <p>Email：<span id="settingsUserEmail">-</span></p>
-      <p>名稱：<span id="settingsUserName">-</span></p>
-      <button id="changeNameBtn">修改名稱</button>
-    </div>
-
-    <div class="setting-section">
-      <h3>修改密碼</h3>
-      <label>新密碼 <input id="newPasswordInput" type="password" /></label>
-      <button id="changePasswordBtn">更新密碼</button>
-    </div>
-
-    <div class="setting-section danger-zone">
-      <h3>危險區域</h3>
-      <button id="deleteAccountBtn" class="danger">刪除帳號</button>
-    </div>
-  </div>
-
-  <!-- Sortable.js -->
-  <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
-
   <div id="settingsDrawer">
-  <h2>帳號設定</h2>
+    <h2>帳號設定</h2>
 
-  <div class="settings-row">
-    <span>Email：</span>
-    <div id="settingsUserEmail"></div>
+    <div class="settings-row">
+      <span>Email：</span>
+      <div id="settingsUserEmail">-</div>
+    </div>
+
+    <div class="settings-row">
+      <span>名稱：</span>
+      <div id="settingsUserName">-</div>
+    </div>
+
+    <button id="changeNameBtn">修改名稱</button>
+
+    <label>修改密碼
+      <input type="password" id="newPasswordInput" placeholder="新密碼" />
+    </label>
+    <button id="changePasswordBtn">更新密碼</button>
+
+    <button id="deleteAccountBtn" class="danger">刪除帳號</button>
+
+    <button id="closeSettingsBtn" class="secondary" style="margin-top:20px;width:100%">關閉</button>
   </div>
 
-  <div class="settings-row">
-    <span>名稱：</span>
-    <div id="settingsUserName"></div>
-  </div>
-
-  <button id="changeNameBtn">修改名稱</button>
-
-  <label>
-    修改密碼
-    <input type="password" id="newPasswordInput" placeholder="新密碼" />
-  </label>
-  <button id="changePasswordBtn">更新密碼</button>
-
-  <button id="deleteAccountBtn" class="danger">刪除帳號</button>
-
-  <button id="closeSettingsBtn" class="secondary" style="margin-top:20px;width:100%">關閉</button>
-</div>
-  <!-- Main JS -->
+  <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
   <script src="main.js"></script>
 </body>
 </html>
