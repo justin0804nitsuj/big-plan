@@ -1,353 +1,219 @@
-// server.js
-// Time Manager Backend - 完整版
-// 功能：註冊、登入、修改名稱、修改密碼、刪除帳號、全量資料讀寫、admin users
-
+// ===============================
+// Imports
+// ===============================
 const express = require("express");
-const cors = require("cors");
-const bcrypt = require("bcryptjs");
-const jwt = require("jsonwebtoken");
 const fs = require("fs");
 const path = require("path");
+const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
+const cors = require("cors");
+
 require("dotenv").config();
 
+// ===============================
+// App & Middleware
+// ===============================
 const app = express();
-const PORT = process.env.PORT || 10000;
-
-// ====== CORS & JSON ======
-app.use(
-  cors({
-    origin: true,
-    credentials: true,
-  })
-);
+app.use(cors());
 app.use(express.json());
 
-// ====== 路徑設定 ======
-const DATA_DIR = path.join(__dirname, "db");
-const USERS_FILE = path.join(DATA_DIR, "users.json");
-const USER_DATA_FILE = path.join(DATA_DIR, "userData.json");
+// Secret Key
+const JWT_SECRET = process.env.JWT_SECRET || "SUPER_SECRET_KEY_CHANGE_THIS";
 
-// ====== 確保資料夾 & 檔案存在 ======
-if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
+// ===============================
+// File Paths
+// ===============================
+const USERS_FILE = path.join(__dirname, "users.json");
+const USERDATA_DIR = path.join(__dirname, "userdata");
+
+// 若 userdata 資料夾不存在，建立
+if (!fs.existsSync(USERDATA_DIR)) {
+  fs.mkdirSync(USERDATA_DIR);
 }
 
-if (!fs.existsSync(USERS_FILE)) {
-  fs.writeFileSync(USERS_FILE, JSON.stringify([], null, 2));
-}
-
-if (!fs.existsSync(USER_DATA_FILE)) {
-  fs.writeFileSync(USER_DATA_FILE, JSON.stringify({}, null, 2));
-}
-
-// ====== Helper: 讀寫 Users ======
+// ===============================
+// Load & Save Helper Functions
+// ===============================
 function loadUsers() {
-  const raw = fs.readFileSync(USERS_FILE, "utf-8");
-  return JSON.parse(raw);
+  if (!fs.existsSync(USERS_FILE)) return [];
+  return JSON.parse(fs.readFileSync(USERS_FILE, "utf8"));
 }
 
 function saveUsers(users) {
   fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
 }
 
-// ====== Helper: 讀寫 User Data（appData）=====
-function loadAllUserData() {
-  const raw = fs.readFileSync(USER_DATA_FILE, "utf-8");
-  return JSON.parse(raw);
-}
-
-function saveAllUserData(allData) {
-  fs.writeFileSync(USER_DATA_FILE, JSON.stringify(allData, null, 2));
-}
-
-const DEFAULT_APP_DATA = {
-  tasks: [],
-  pomodoroHistory: [],
-  settings: {
-    focusMinutes: 25,
-    breakMinutes: 5,
-  },
-  dailyStats: {},
-};
-
-// ====== JWT ======
-const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-this";
-
-function signToken(user) {
-  return jwt.sign(
-    {
-      id: user.id,
-      email: user.email,
-      name: user.name,
-    },
-    JWT_SECRET,
-    { expiresIn: "7d" }
-  );
-}
-
-function authMiddleware(req, res, next) {
-  const auth = req.headers.authorization || "";
-  if (!auth.startsWith("Bearer ")) {
-    return res.status(401).json({ error: "No token provided" });
+function loadUserData(userId) {
+  const filePath = path.join(USERDATA_DIR, `${userId}.json`);
+  if (!fs.existsSync(filePath)) {
+    return {
+      tasks: [],
+      pomodoroHistory: [],
+      settings: { focusMinutes: 25, breakMinutes: 5 },
+      dailyStats: {},
+    };
   }
+  return JSON.parse(fs.readFileSync(filePath, "utf8"));
+}
 
-  const token = auth.slice(7);
+function saveUserData(userId, data) {
+  const filePath = path.join(USERDATA_DIR, `${userId}.json`);
+  fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+}
+
+// ===============================
+// Auth Middleware
+// ===============================
+function authMiddleware(req, res, next) {
+  const header = req.headers.authorization;
+  if (!header) return res.status(401).json({ error: "缺少 Authorization Header" });
+
+  const token = header.split(" ")[1];
+  if (!token) return res.status(401).json({ error: "Token 不存在" });
+
   try {
-    const payload = jwt.verify(token, JWT_SECRET);
-    const users = loadUsers();
-    const found = users.find((u) => u.id === payload.id);
-    if (!found) {
-      return res.status(401).json({ error: "User not found" });
-    }
-    req.user = { id: found.id, email: found.email, name: found.name };
+    const decoded = jwt.verify(token, JWT_SECRET);
+    req.userId = decoded.id;
     next();
   } catch (err) {
-    console.error("JWT error:", err.message);
-    return res.status(401).json({ error: "Invalid token" });
+    return res.status(401).json({ error: "Token 無效或已過期" });
   }
 }
 
-// ====== Root Test Route ======
-app.get("/", (req, res) => {
-  res.send("Time Manager Backend is running.");
-});
+// ===============================
+// Auth Routes
+// ===============================
 
-// ====== Auth: Register ======
+// ------ 註冊 ------
 app.post("/auth/register", async (req, res) => {
-  try {
-    const { name, email, password } = req.body || {};
-    if (!name || !email || !password) {
-      return res.status(400).json({ error: "缺少 name / email / password" });
-    }
+  const { name, email, password } = req.body;
 
-    const normEmail = String(email).toLowerCase();
-    let users = loadUsers();
+  if (!name || !email || !password)
+    return res.status(400).json({ error: "缺少必要欄位 name / email / password" });
 
-    if (users.find((u) => u.email === normEmail)) {
-      return res.status(400).json({ error: "此 Email 已被註冊" });
-    }
+  let users = loadUsers();
 
-    const passwordHash = await bcrypt.hash(password, 10);
-    const newUser = {
-      id: `u_${Date.now()}`,
-      name,
-      email: normEmail,
-      passwordHash,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
-    users.push(newUser);
-    saveUsers(users);
-
-    // 預設資料
-    const allData = loadAllUserData();
-    allData[newUser.id] = DEFAULT_APP_DATA;
-    saveAllUserData(allData);
-
-    const token = signToken(newUser);
-    res.json({
-      user: { id: newUser.id, name: newUser.name, email: newUser.email },
-      token,
-    });
-  } catch (err) {
-    console.error("Register error:", err);
-    res.status(500).json({ error: "註冊失敗" });
-  }
-});
-
-// ====== Auth: Login ======
-app.post("/auth/login", async (req, res) => {
-  try {
-    const { email, password } = req.body || {};
-    if (!email || !password) {
-      return res.status(400).json({ error: "缺少 email / password" });
-    }
-
-    const normEmail = String(email).toLowerCase();
-    const users = loadUsers();
-    const user = users.find((u) => u.email === normEmail);
-    if (!user) {
-      return res.status(400).json({ error: "帳號或密碼錯誤" });
-    }
-
-    const ok = await bcrypt.compare(password, user.passwordHash);
-    if (!ok) {
-      return res.status(400).json({ error: "帳號或密碼錯誤" });
-    }
-
-    const token = signToken(user);
-    res.json({
-      user: { id: user.id, name: user.name, email: user.email },
-      token,
-    });
-  } catch (err) {
-    console.error("Login error:", err);
-    res.status(500).json({ error: "登入失敗" });
-  }
-});
-
-// ====== Auth: 取得目前使用者 ======
-app.get("/auth/me", authMiddleware, (req, res) => {
-  res.json({ user: req.user });
-});
-
-// ====== Auth: 修改名稱 ======
-app.patch("/auth/change-name", authMiddleware, (req, res) => {
-  try {
-    const { name } = req.body || {};
-    if (!name) return res.status(400).json({ error: "缺少 name" });
-
-    const users = loadUsers();
-    const idx = users.findIndex((u) => u.id === req.user.id);
-    if (idx === -1) return res.status(404).json({ error: "User not found" });
-
-    users[idx].name = name;
-    users[idx].updatedAt = new Date().toISOString();
-    saveUsers(users);
-
-    const token = signToken(users[idx]);
-
-    res.json({
-      user: { id: users[idx].id, name: users[idx].name, email: users[idx].email },
-      token,
-    });
-  } catch (err) {
-    console.error("change-name error:", err);
-    res.status(500).json({ error: "更新名稱失敗" });
-  }
-});
-
-// ====== Auth: 修改密碼 ======
-app.patch("/auth/change-password", authMiddleware, async (req, res) => {
-  try {
-    const { newPassword } = req.body || {};
-    if (!newPassword || newPassword.length < 6) {
-      return res
-        .status(400)
-        .json({ error: "新密碼長度至少 6 碼" });
-    }
-
-    const users = loadUsers();
-    const idx = users.findIndex((u) => u.id === req.user.id);
-    if (idx === -1) return res.status(404).json({ error: "User not found" });
-
-    const hash = await bcrypt.hash(newPassword, 10);
-    users[idx].passwordHash = hash;
-    users[idx].updatedAt = new Date().toISOString();
-    saveUsers(users);
-
-    res.json({ success: true });
-  } catch (err) {
-    console.error("change-password error:", err);
-    res.status(500).json({ error: "更新密碼失敗" });
-  }
-});
-
-// ====== Auth: 刪除帳號 ======
-app.delete("/auth/delete", authMiddleware, (req, res) => {
-  try {
-    const userId = req.user.id;
-
-    let users = loadUsers();
-    const exists = users.find((u) => u.id === userId);
-    if (!exists) {
-      return res.status(404).json({ error: "User not found" });
-    }
-
-    users = users.filter((u) => u.id !== userId);
-    saveUsers(users);
-
-    const allData = loadAllUserData();
-    if (allData[userId]) {
-      delete allData[userId];
-      saveAllUserData(allData);
-    }
-
-    return res.json({ success: true });
-  } catch (err) {
-    console.error("delete-user error:", err);
-    return res.status(500).json({ error: "刪除帳號失敗" });
-  }
-});
-
-// ====== 使用者完整資料（tasks 等）=====
-
-// 讀取
-app.get("/data/full", authMiddleware, (req, res) => {
-  try {
-    const userId = req.user.id;
-    const allData = loadAllUserData();
-    const data = allData[userId] || DEFAULT_APP_DATA;
-    res.json(data);
-  } catch (err) {
-    console.error("GET /data/full error:", err);
-    res.status(500).json({ error: "讀取資料失敗" });
-  }
-});
-
-// 寫入
-app.post("/data/full", authMiddleware, (req, res) => {
-  try {
-    const userId = req.user.id;
-    const incoming = req.body || {};
-
-    const merged = {
-      tasks: Array.isArray(incoming.tasks) ? incoming.tasks : [],
-      pomodoroHistory: Array.isArray(incoming.pomodoroHistory)
-        ? incoming.pomodoroHistory
-        : [],
-      settings: {
-        focusMinutes:
-          incoming.settings && incoming.settings.focusMinutes
-            ? incoming.settings.focusMinutes
-            : 25,
-        breakMinutes:
-          incoming.settings && incoming.settings.breakMinutes
-            ? incoming.settings.breakMinutes
-            : 5,
-      },
-      dailyStats:
-        incoming.dailyStats && typeof incoming.dailyStats === "object"
-          ? incoming.dailyStats
-          : {},
-    };
-
-    const allData = loadAllUserData();
-    allData[userId] = merged;
-    saveAllUserData(allData);
-
-    res.json({ success: true });
-  } catch (err) {
-    console.error("POST /data/full error:", err);
-    res.status(500).json({ error: "儲存資料失敗" });
-  }
-});
-
-// ====== Admin: 列出所有使用者 ======
-app.get("/admin/users", (req, res) => {
-  const secret = req.query.secret;
-  const adminKey = process.env.ADMIN_KEY;
-
-  if (!adminKey || secret !== adminKey) {
-    return res.status(403).json({ error: "Forbidden" });
+  if (users.find(u => u.email === email)) {
+    return res.status(400).json({ error: "此 email 已被註冊" });
   }
 
-  const users = loadUsers().map((u) => ({
-    id: u.id,
-    email: u.email,
-    name: u.name,
-    createdAt: u.createdAt,
-    updatedAt: u.updatedAt,
-  }));
+  const passwordHash = await bcrypt.hash(password, 10);
+  const newUser = {
+    id: `u_${Date.now()}`,
+    name,
+    email,
+    passwordHash,
+  };
+
+  users.push(newUser);
+  saveUsers(users);
+
+  // 建立預設空資料
+  saveUserData(newUser.id, {
+    tasks: [],
+    pomodoroHistory: [],
+    settings: { focusMinutes: 25, breakMinutes: 5 },
+    dailyStats: {},
+  });
+
+  const token = jwt.sign({ id: newUser.id }, JWT_SECRET, { expiresIn: "365d" });
 
   res.json({
-    count: users.length,
-    users,
+    user: { id: newUser.id, name: newUser.name, email: newUser.email },
+    token,
   });
 });
 
-// ====== 啟動 ======
+// ------ 登入 ------
+app.post("/auth/login", async (req, res) => {
+  const { email, password } = req.body;
+
+  let users = loadUsers();
+  const user = users.find(u => u.email === email);
+
+  if (!user) return res.status(400).json({ error: "帳號不存在" });
+
+  const valid = await bcrypt.compare(password, user.passwordHash);
+  if (!valid) return res.status(400).json({ error: "密碼錯誤" });
+
+  const token = jwt.sign({ id: user.id }, JWT_SECRET, { expiresIn: "365d" });
+
+  res.json({
+    user: { id: user.id, name: user.name, email: user.email },
+    token,
+  });
+});
+
+// ------ 修改名稱 ------
+app.post("/auth/update-name", authMiddleware, (req, res) => {
+  const { name } = req.body;
+
+  if (!name) return res.status(400).json({ error: "缺少 name" });
+
+  let users = loadUsers();
+  const user = users.find(u => u.id === req.userId);
+
+  if (!user) return res.status(404).json({ error: "找不到使用者" });
+
+  user.name = name;
+  saveUsers(users);
+
+  res.json({
+    success: true,
+    user: { id: user.id, name: user.name, email: user.email },
+  });
+});
+
+// ------ 修改密碼 ------
+app.post("/auth/update-password", authMiddleware, async (req, res) => {
+  const { password } = req.body;
+
+  if (!password) return res.status(400).json({ error: "缺少 password" });
+
+  let users = loadUsers();
+  const user = users.find(u => u.id === req.userId);
+
+  if (!user) return res.status(404).json({ error: "找不到使用者" });
+
+  user.passwordHash = await bcrypt.hash(password, 10);
+  saveUsers(users);
+
+  res.json({ success: true });
+});
+
+// ------ 刪除帳號 ------
+app.delete("/auth/delete", authMiddleware, (req, res) => {
+  let users = loadUsers();
+  users = users.filter(u => u.id !== req.userId);
+  saveUsers(users);
+
+  const userDataFile = path.join(USERDATA_DIR, `${req.userId}.json`);
+  if (fs.existsSync(userDataFile)) fs.unlinkSync(userDataFile);
+
+  res.json({ success: true });
+});
+
+// ===============================
+// User Data Routes
+// ===============================
+
+// ------ 取得使用者全部資料 ------
+app.get("/data/full", authMiddleware, (req, res) => {
+  const data = loadUserData(req.userId);
+  res.json(data);
+});
+
+// ------ 更新使用者資料 ------
+app.post("/data/full", authMiddleware, (req, res) => {
+  const data = req.body;
+  saveUserData(req.userId, data);
+  res.json({ success: true });
+});
+
+// ===============================
+// Server Start
+// ===============================
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Backend running on port ${PORT}`);
+  console.log("Backend running on port", PORT);
 });
