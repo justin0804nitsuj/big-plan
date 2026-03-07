@@ -4,14 +4,13 @@
 const LS_GUEST_KEY = "timeManager_guest_v1";
 const LS_USER_CACHE_KEY = "timeManager_user_cache_v1";
 const LS_AUTH_KEY = "timeManager_auth_v1";
-
 const API_BASE = "https://big-plan.onrender.com";
 
 /* ======================================================
    Global State
 ====================================================== */
 let authState = {
-  mode: "guest", // "guest" or "user"
+  mode: "guest",
   user: null,
   token: null,
 };
@@ -23,11 +22,12 @@ let appData = {
     focusMinutes: 25,
     breakMinutes: 5,
   },
-  dailyStats: {}, // "YYYY-MM-DD": { done, total }
+  dailyStats: {},
 };
 
 let currentFilter = "all";
 let currentTaskIdForPomodoro = null;
+let myChart = null; // Chart.js 實例
 
 let timerState = {
   mode: "focus",
@@ -45,21 +45,11 @@ function createId(prefix) {
   return `${prefix}_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
 }
 
-/* Toast：右下角黑底白字 + 紅框 */
-function showToast(message) {
-  const toast = document.createElement("div");
-  toast.className = "toast";
-  toast.textContent = message;
-  document.body.appendChild(toast);
-
-  requestAnimationFrame(() => {
-    toast.classList.add("show");
-  });
-
-  setTimeout(() => {
-    toast.classList.remove("show");
-    setTimeout(() => toast.remove(), 350);
-  }, 2400);
+function showToast(msg) {
+  const toast = document.getElementById("toast");
+  toast.textContent = msg;
+  toast.classList.add("show");
+  setTimeout(() => toast.classList.remove("show"), 3000);
 }
 
 /* ======================================================
@@ -80,6 +70,56 @@ function loadAuthState() {
 
 function saveAuthState() {
   localStorage.setItem(LS_AUTH_KEY, JSON.stringify(authState));
+}
+
+/* ======================================================
+   Data Logic (Merge & Sync)
+====================================================== */
+
+// 儲存資料（判斷是存本地還是傳伺服器）
+function saveData() {
+  if (authState.mode === "user" && authState.token) {
+    localStorage.setItem(LS_USER_CACHE_KEY, JSON.stringify(appData));
+    scheduleSaveDataToServer();
+  } else {
+    localStorage.setItem(LS_GUEST_KEY, JSON.stringify(appData));
+  }
+}
+
+let saveTimeout = null;
+function scheduleSaveDataToServer() {
+  if (saveTimeout) clearTimeout(saveTimeout);
+  saveTimeout = setTimeout(async () => {
+    try {
+      await fetch(`${API_BASE}/data/full`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${authState.token}`,
+        },
+        body: JSON.stringify(appData),
+      });
+    } catch (err) {
+      console.error("同步至雲端失敗", err);
+    }
+  }, 500);
+}
+
+// 從伺服器載入資料
+async function loadUserDataFromServer() {
+  const res = await fetch(`${API_BASE}/data/full`, {
+    headers: { Authorization: `Bearer ${authState.token}` },
+  });
+  if (res.ok) {
+    const serverData = await res.json();
+    appData = {
+      ...appData,
+      ...serverData,
+      tasks: serverData.tasks || [],
+      dailyStats: serverData.dailyStats || {},
+    };
+    localStorage.setItem(LS_USER_CACHE_KEY, JSON.stringify(appData));
+  }
 }
 
 /* ======================================================
@@ -909,6 +949,174 @@ function updateAuthUI() {
 
     settingsUserEmailEl.textContent = "-";
     settingsUserNameEl.textContent = "-";
+  }
+}
+
+/* ======================================================
+   UI Rendering (Task & Chart)
+====================================================== */
+
+function renderTaskList() {
+  const listEl = document.getElementById("taskList");
+  listEl.innerHTML = "";
+
+  const filteredTasks = appData.tasks.filter((t) => {
+    if (currentFilter === "todo") return t.status === "todo";
+    if (currentFilter === "done") return t.status === "done";
+    return true;
+  });
+
+  filteredTasks.forEach((task) => {
+    const li = document.createElement("li");
+    li.className = `task-item ${task.status === "done" ? "done" : ""}`;
+    li.dataset.id = task.id;
+
+    // --- 主任務內容 ---
+    const mainContent = document.createElement("div");
+    mainContent.className = "task-main-row";
+    mainContent.innerHTML = `
+      <div class="task-info">
+        <input type="checkbox" ${task.status === "done" ? "checked" : ""} />
+        <span class="task-title">${task.title}</span>
+        <span class="badge ${task.priority}">${task.priority}</span>
+      </div>
+    `;
+
+    // 勾選任務邏輯
+    mainContent.querySelector("input").onchange = (e) => {
+      task.status = e.target.checked ? "done" : "todo";
+      updateDailyStatsOnTaskChange(e.target.checked);
+      saveData();
+      renderTaskList();
+      renderTodayStats();
+    };
+
+    // --- 子任務區塊 ---
+    const subtaskContainer = document.createElement("div");
+    subtaskContainer.className = "subtask-container";
+    
+    (task.subtasks || []).forEach((st, idx) => {
+      const stItem = document.createElement("div");
+      stItem.className = "subtask-item";
+      stItem.innerHTML = `
+        <input type="checkbox" ${st.status === 'done' ? 'checked' : ''}>
+        <span class="${st.status === 'done' ? 'st-done' : ''}">${st.title}</span>
+      `;
+      stItem.querySelector("input").onchange = (e) => {
+        task.subtasks[idx].status = e.target.checked ? 'done' : 'todo';
+        saveData();
+        renderTaskList();
+      };
+      subtaskContainer.appendChild(stItem);
+    });
+
+    const addStInput = document.createElement("input");
+    addStInput.placeholder = "+ 子任務...";
+    addStInput.className = "subtask-input";
+    addStInput.onkeydown = (e) => {
+      if (e.key === 'Enter' && addStInput.value.trim()) {
+        if (!task.subtasks) task.subtasks = [];
+        task.subtasks.push({ title: addStInput.value.trim(), status: 'todo' });
+        addStInput.value = "";
+        saveData();
+        renderTaskList();
+      }
+    };
+
+    // --- 操作按鈕 ---
+    const actions = document.createElement("div");
+    actions.className = "task-actions";
+    
+    const focusBtn = document.createElement("button");
+    focusBtn.textContent = "專注";
+    focusBtn.className = "small";
+    focusBtn.onclick = () => {
+      currentTaskIdForPomodoro = task.id;
+      updateCurrentTaskLabel();
+      showToast(`正在專注於：${task.title}`);
+    };
+
+    const delBtn = document.createElement("button");
+    delBtn.textContent = "刪除";
+    delBtn.className = "danger small";
+    delBtn.onclick = () => {
+      appData.tasks = appData.tasks.filter((t) => t.id !== task.id);
+      saveData();
+      renderTaskList();
+      renderTodayStats();
+    };
+
+    actions.appendChild(focusBtn);
+    actions.appendChild(delBtn);
+
+    li.appendChild(mainContent);
+    li.appendChild(subtaskContainer);
+    li.appendChild(addStInput);
+    li.appendChild(actions);
+    listEl.appendChild(li);
+  });
+}
+
+function renderTodayStats() {
+  const dateStr = new Date().toISOString().slice(0, 10);
+  const stats = appData.dailyStats[dateStr] || { done: 0, total: 0 };
+  const label = document.getElementById("todayStatsLabel");
+  if (label) {
+    label.textContent = `今日進度：${stats.done} / ${stats.total} 任務完成`;
+  }
+  renderWeeklyChart();
+}
+
+/* ======================================================
+   Auth Handlers (With Merge Logic)
+====================================================== */
+
+async function handleAuthSubmit() {
+  const modalType = document.getElementById("authModalTitle").textContent;
+  const isLogin = modalType === "登入";
+  const email = document.getElementById("authEmailInput").value;
+  const password = document.getElementById("authPasswordInput").value;
+  const name = document.getElementById("authNameInput").value;
+
+  const endpoint = isLogin ? "/auth/login" : "/auth/register";
+  const body = isLogin ? { email, password } : { email, password, name };
+
+  try {
+    const res = await fetch(`${API_BASE}${endpoint}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      
+      // ⭐ 核心：備份目前 Guest 模式的任務
+      const guestTasks = [...appData.tasks];
+      
+      authState = { mode: "user", token: data.token, user: data.user };
+      saveAuthState();
+
+      // 載入雲端資料
+      await loadUserDataFromServer();
+
+      // ⭐ 核心：將 Guest 任務併入 User 資料
+      if (guestTasks.length > 0) {
+        const serverIds = new Set(appData.tasks.map(t => t.id));
+        const uniqueGuestTasks = guestTasks.filter(t => !serverIds.has(t.id));
+        appData.tasks = [...appData.tasks, ...uniqueGuestTasks];
+        saveData(); // 合併後同步
+        showToast(`已將 ${uniqueGuestTasks.length} 個本機任務同步至帳號`);
+      }
+
+      closeModal("authModal");
+      afterDataLoaded();
+    } else {
+      const err = await res.json();
+      alert(err.error || "認證失敗");
+    }
+  } catch (err) {
+    alert("連線伺服器失敗");
   }
 }
 
