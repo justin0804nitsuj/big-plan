@@ -7,7 +7,7 @@ const LS_AUTH_KEY = "timeManager_auth_v1";
 const API_BASE = "https://big-plan.onrender.com";
 
 /* ======================================================
-   Global State
+   Global State (全域狀態)
 ====================================================== */
 let authState = {
   mode: "guest",
@@ -27,7 +27,7 @@ let appData = {
 
 let currentFilter = "all";
 let currentTaskIdForPomodoro = null;
-let myChart = null; // Chart.js 實例
+let myChart = null; 
 
 let timerState = {
   mode: "focus",
@@ -39,7 +39,7 @@ let timerState = {
 let sortableInitialized = false;
 
 /* ======================================================
-   Utils
+   Utils (工具函數)
 ====================================================== */
 function createId(prefix) {
   return `${prefix}_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
@@ -47,120 +47,17 @@ function createId(prefix) {
 
 function showToast(msg) {
   const toast = document.getElementById("toast");
+  if (!toast) return;
   toast.textContent = msg;
   toast.classList.add("show");
   setTimeout(() => toast.classList.remove("show"), 3000);
 }
 
 /* ======================================================
-   Auth State Load / Save
-====================================================== */
-function loadAuthState() {
-  const raw = localStorage.getItem(LS_AUTH_KEY);
-  if (!raw) return;
-  try {
-    const parsed = JSON.parse(raw);
-    if (parsed && (parsed.mode === "guest" || parsed.mode === "user")) {
-      authState = parsed;
-    }
-  } catch (e) {
-    console.error("Failed to parse auth state:", e);
-  }
-}
-
-function saveAuthState() {
-  localStorage.setItem(LS_AUTH_KEY, JSON.stringify(authState));
-}
-
-/* ======================================================
-   Data Logic (Merge & Sync)
-====================================================== */
-
-// 儲存資料（判斷是存本地還是傳伺服器）
-function saveData() {
-  if (authState.mode === "user" && authState.token) {
-    localStorage.setItem(LS_USER_CACHE_KEY, JSON.stringify(appData));
-    scheduleSaveDataToServer();
-  } else {
-    localStorage.setItem(LS_GUEST_KEY, JSON.stringify(appData));
-  }
-}
-
-let saveTimeout = null;
-function scheduleSaveDataToServer() {
-  if (saveTimeout) clearTimeout(saveTimeout);
-  saveTimeout = setTimeout(async () => {
-    try {
-      await fetch(`${API_BASE}/data/full`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${authState.token}`,
-        },
-        body: JSON.stringify(appData),
-      });
-    } catch (err) {
-      console.error("同步至雲端失敗", err);
-    }
-  }, 500);
-}
-
-// 從伺服器載入資料
-async function loadUserDataFromServer() {
-  const res = await fetch(`${API_BASE}/data/full`, {
-    headers: { Authorization: `Bearer ${authState.token}` },
-  });
-  if (res.ok) {
-    const serverData = await res.json();
-    appData = {
-      ...appData,
-      ...serverData,
-      tasks: serverData.tasks || [],
-      dailyStats: serverData.dailyStats || {},
-    };
-    localStorage.setItem(LS_USER_CACHE_KEY, JSON.stringify(appData));
-  }
-}
-
-/* ======================================================
-   Guest / User Data Load / Save
-====================================================== */
-function loadGuestData() {
-  const raw = localStorage.getItem(LS_GUEST_KEY);
-  if (!raw) return;
-  try {
-    const parsed = JSON.parse(raw);
-    appData = { ...appData, ...parsed };
-  } catch (e) {
-    console.error("Failed to parse guest data:", e);
-  }
-}
-
-function saveGuestData() {
-  localStorage.setItem(LS_GUEST_KEY, JSON.stringify(appData));
-}
-
-function loadUserCacheData() {
-  const raw = localStorage.getItem(LS_USER_CACHE_KEY);
-  if (!raw) return;
-  try {
-    const parsed = JSON.parse(raw);
-    appData = { ...appData, ...parsed };
-  } catch (e) {
-    console.error("Failed to parse user cache:", e);
-  }
-}
-
-function saveUserCacheData() {
-  localStorage.setItem(LS_USER_CACHE_KEY, JSON.stringify(appData));
-}
-
-/* ======================================================
-   API Wrapper
+   API & Auth Logic
 ====================================================== */
 async function apiRequest(path, options = {}) {
   const url = API_BASE + path;
-
   const res = await fetch(url, {
     headers: {
       "Content-Type": "application/json",
@@ -177,791 +74,81 @@ async function apiRequest(path, options = {}) {
     } catch (_) {}
     throw new Error(msg);
   }
+  return res.status === 204 ? null : res.json();
+}
 
-  if (res.status === 204) return null;
-  return res.json();
+function loadAuthState() {
+  const raw = localStorage.getItem(LS_AUTH_KEY);
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && (parsed.mode === "guest" || parsed.mode === "user")) {
+        authState = parsed;
+      }
+    } catch (e) { console.error("Auth state parse failed", e); }
+  }
+}
+
+function saveAuthState() {
+  localStorage.setItem(LS_AUTH_KEY, JSON.stringify(authState));
 }
 
 /* ======================================================
-   Server Data Load / Save
+   Data Sync Logic (資料同步與合併)
 ====================================================== */
-async function loadUserDataFromServer() {
-  if (!authState.token) throw new Error("No token");
-  const data = await apiRequest("/data/full", {
-    method: "GET",
-    headers: {
-      Authorization: `Bearer ${authState.token}`,
-    },
-  });
-
-  appData = { ...appData, ...data };
-  saveUserCacheData();
-}
-
-let saveServerTimeout = null;
-
-function scheduleSaveDataToServer() {
-  if (!authState.token) return;
-  if (saveServerTimeout) clearTimeout(saveServerTimeout);
-
-  saveServerTimeout = setTimeout(async () => {
-    try {
-      await apiRequest("/data/full", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${authState.token}`,
-        },
-        body: JSON.stringify(appData),
-      });
-    } catch (err) {
-      console.warn("Failed to save data to server:", err);
-      showToast("雲端同步失敗（稍後自動重試）");
-    }
-  }, 500);
-}
-
 function saveData() {
   if (authState.mode === "guest") {
-    saveGuestData();
+    localStorage.setItem(LS_GUEST_KEY, JSON.stringify(appData));
   } else {
-    saveUserCacheData();
+    localStorage.setItem(LS_USER_CACHE_KEY, JSON.stringify(appData));
     scheduleSaveDataToServer();
   }
 }
 
-/* ======================================================
-   DOM Elements
-====================================================== */
-// Task
-const taskListEl = document.getElementById("taskList");
-const taskFormEl = document.getElementById("taskForm");
-const taskIdEl = document.getElementById("taskId");
-const taskTitleEl = document.getElementById("taskTitle");
-const taskDescriptionEl = document.getElementById("taskDescription");
-const taskDueDateEl = document.getElementById("taskDueDate");
-const taskPriorityEl = document.getElementById("taskPriority");
-const taskCategoryEl = document.getElementById("taskCategory");
-const clearFormBtn = document.getElementById("clearFormBtn");
-const filterButtons = document.querySelectorAll(".filter-btn");
-
-// Stats
-const todayStatsLabelEl = document.getElementById("todayStatsLabel");
-
-// Pomodoro
-const timerModeLabelEl = document.getElementById("timerModeLabel");
-const timerValueEl = document.getElementById("timerValue");
-const currentTaskLabelEl = document.getElementById("currentTaskLabel");
-const startTimerBtn = document.getElementById("startTimerBtn");
-const pauseTimerBtn = document.getElementById("pauseTimerBtn");
-const resetTimerBtn = document.getElementById("resetTimerBtn");
-const focusMinutesInput = document.getElementById("focusMinutesInput");
-const breakMinutesInput = document.getElementById("breakMinutesInput");
-const saveSettingsBtn = document.getElementById("saveSettingsBtn");
-
-// Import / Export
-const exportJsonBtn = document.getElementById("exportJsonBtn");
-const importJsonInput = document.getElementById("importJsonInput");
-
-// Auth UI
-const authStatusLabelEl = document.getElementById("authStatusLabel");
-const authActionBtnEl = document.getElementById("authActionBtn");
-
-// Auth Modal
-const authModalEl = document.getElementById("authModal");
-const authModalTitleEl = document.getElementById("authModalTitle");
-const authNameGroupEl = document.getElementById("authNameGroup");
-const authNameInputEl = document.getElementById("authNameInput");
-const authEmailInputEl = document.getElementById("authEmailInput");
-const authPasswordInputEl = document.getElementById("authPasswordInput");
-const authSubmitBtnEl = document.getElementById("authSubmitBtn");
-const authCancelBtnEl = document.getElementById("authCancelBtn");
-const authToggleLabelEl = document.getElementById("authToggleLabel");
-const authToggleBtnEl = document.getElementById("authToggleBtn");
-
-// Settings Drawer
-const settingsDrawerEl = document.getElementById("settingsDrawer");
-const openSettingsBtn = document.getElementById("openSettingsBtn");
-const closeSettingsBtn = document.getElementById("closeSettingsBtn");
-const settingsUserEmailEl = document.getElementById("settingsUserEmail");
-const settingsUserNameEl = document.getElementById("settingsUserName");
-const changeNameBtn = document.getElementById("changeNameBtn");
-const newPasswordInputEl = document.getElementById("newPasswordInput");
-const changePasswordBtn = document.getElementById("changePasswordBtn");
-const deleteAccountBtn = document.getElementById("deleteAccountBtn");
-
-/* ======================================================
-   Task Management
-====================================================== */
-function renderTaskList() {
-  taskListEl.innerHTML = "";
-
-  let filteredTasks = appData.tasks.filter((task) => {
-    if (currentFilter === "todo") return task.status !== "done";
-    if (currentFilter === "done") return task.status === "done";
-    return true;
-  });
-
-  filteredTasks.forEach((task) => {
-    const li = document.createElement("li");
-    li.className = "task-item";
-    li.dataset.category = task.category || "";
-    li.dataset.taskId = task.id;
-    if (task.status === "done") li.classList.add("done");
-
-    const main = document.createElement("div");
-    main.className = "task-main";
-
-    const checkbox = document.createElement("input");
-    checkbox.type = "checkbox";
-    checkbox.checked = task.status === "done";
-
-    const titleSpan = document.createElement("span");
-    titleSpan.className = "task-title";
-    titleSpan.textContent = task.title;
-
-    main.appendChild(checkbox);
-    main.appendChild(titleSpan);
-
-    const meta1 = document.createElement("div");
-    meta1.className = "task-meta";
-    meta1.textContent = `截止：${task.dueDate || "無"}　|　優先度：${task.priority}`;
-
-    const meta2 = document.createElement("div");
-    meta2.className = "task-meta";
-    meta2.textContent = `分類：${task.category || "無"}`;
-
-    const actions = document.createElement("div");
-    actions.className = "task-actions";
-
-    const editBtn = document.createElement("button");
-    editBtn.textContent = "編輯";
-
-    const bindBtn = document.createElement("button");
-    bindBtn.textContent = "綁定番茄鐘";
-
-    const delBtn = document.createElement("button");
-    delBtn.textContent = "刪除";
-    delBtn.classList.add("danger");
-
-    actions.appendChild(editBtn);
-    actions.appendChild(bindBtn);
-    actions.appendChild(delBtn);
-
-    li.appendChild(main);
-    li.appendChild(meta1);
-    li.appendChild(meta2);
-    li.appendChild(actions);
-
-    // Events
-    checkbox.addEventListener("change", () => {
-      setTaskDone(task.id, checkbox.checked);
-    });
-
-    editBtn.addEventListener("click", () => {
-      fillFormForEdit(task);
-    });
-
-    bindBtn.addEventListener("click", () => {
-      currentTaskIdForPomodoro = task.id;
-      updateCurrentTaskLabel();
-      showToast("已綁定番茄鐘");
-    });
-
-    delBtn.addEventListener("click", () => {
-      if (confirm("確定刪除任務？")) {
-        deleteTask(task.id);
-      }
-    });
-
-    taskListEl.appendChild(li);
-  });
-
-  renderTodayStats();
-}
-
-function addTask(task) {
-  appData.tasks.push(task);
-  saveData();
-  renderTaskList();
-}
-
-function updateTask(id, updates) {
-  const idx = appData.tasks.findIndex((t) => t.id === id);
-  if (idx >= 0) {
-    appData.tasks[idx] = { ...appData.tasks[idx], ...updates };
-    saveData();
-    renderTaskList();
-  }
-}
-
-function deleteTask(id) {
-  appData.tasks = appData.tasks.filter((t) => t.id !== id);
-  saveData();
-  renderTaskList();
-}
-
-function setTaskDone(id, done) {
-  updateTask(id, { status: done ? "done" : "todo" });
-
-  const today = new Date().toISOString().slice(0, 10);
-  const todayTasks = appData.tasks.filter((t) => t.dueDate === today);
-
-  appData.dailyStats[today] = {
-    done: todayTasks.filter((t) => t.status === "done").length,
-    total: todayTasks.length,
-  };
-
-  saveData();
-}
-
-/* Task Form */
-taskFormEl.addEventListener("submit", (e) => {
-  e.preventDefault();
-
-  const id = taskIdEl.value;
-  const title = taskTitleEl.value.trim();
-  if (!title) {
-    showToast("請輸入任務標題");
-    return;
-  }
-
-  const taskData = {
-    title,
-    description: taskDescriptionEl.value.trim(),
-    dueDate: taskDueDateEl.value || "",
-    priority: taskPriorityEl.value,
-    category: taskCategoryEl.value || "",
-  };
-
-  if (id) {
-    updateTask(id, taskData);
-  } else {
-    addTask({
-      id: createId("t"),
-      status: "todo",
-      ...taskData,
-    });
-  }
-
-  clearForm();
-  showToast("任務已儲存");
-});
-
-function fillFormForEdit(task) {
-  taskIdEl.value = task.id;
-  taskTitleEl.value = task.title;
-  taskDescriptionEl.value = task.description || "";
-  taskDueDateEl.value = task.dueDate || "";
-  taskPriorityEl.value = task.priority || "medium";
-  taskCategoryEl.value = task.category || "";
-}
-
-function clearForm() {
-  taskIdEl.value = "";
-  taskTitleEl.value = "";
-  taskDescriptionEl.value = "";
-  taskDueDateEl.value = "";
-  taskPriorityEl.value = "medium";
-  taskCategoryEl.value = "";
-}
-
-clearFormBtn.addEventListener("click", clearForm);
-
-/* Filter Buttons */
-filterButtons.forEach((btn) => {
-  btn.addEventListener("click", () => {
-    filterButtons.forEach((b) => b.classList.remove("active"));
-    btn.classList.add("active");
-    currentFilter = btn.getAttribute("data-filter");
-    renderTaskList();
-  });
-});
-
-/* ======================================================
-   Sortable (拖曳排序)
-====================================================== */
-function initSortable() {
-  if (sortableInitialized) return;
-  if (!window.Sortable) return;
-
-  new Sortable(taskListEl, {
-    animation: 150,
-    ghostClass: "drag-ghost",
-    onSort: function () {
-      const newOrder = [...taskListEl.children].map((li) =>
-        li.getAttribute("data-task-id")
-      );
-      reorderTasks(newOrder);
-    },
-  });
-
-  sortableInitialized = true;
-}
-
-function reorderTasks(newOrder) {
-  const newTasks = [];
-  newOrder.forEach((id) => {
-    const t = appData.tasks.find((task) => task.id === id);
-    if (t) newTasks.push(t);
-  });
-
-  appData.tasks.forEach((t) => {
-    if (!newOrder.includes(t.id)) newTasks.push(t);
-  });
-
-  appData.tasks = newTasks;
-  saveData();
-  renderTaskList();
-}
-
-/* ======================================================
-   Today Stats
-====================================================== */
-function renderTodayStats() {
-  if (!todayStatsLabelEl) return;
-  const today = new Date().toISOString().slice(0, 10);
-  const stats = appData.dailyStats[today];
-
-  if (!stats || stats.total === 0) {
-    todayStatsLabelEl.textContent = "今日尚無任務記錄";
-    return;
-  }
-  todayStatsLabelEl.textContent = `完成 ${stats.done} / ${stats.total} 個任務`;
-}
-
-/* ======================================================
-   Pomodoro
-====================================================== */
-function updateCurrentTaskLabel() {
-  if (!currentTaskIdForPomodoro) {
-    currentTaskLabelEl.textContent = "尚未選擇任務";
-    return;
-  }
-  const task = appData.tasks.find((t) => t.id === currentTaskIdForPomodoro);
-  if (!task) {
-    currentTaskLabelEl.textContent = "找不到任務（可能已刪除）";
-    return;
-  }
-  currentTaskLabelEl.textContent = task.title;
-}
-
-function updateTimerDisplay() {
-  const m = Math.floor(timerState.remainingSeconds / 60);
-  const s = timerState.remainingSeconds % 60;
-  timerValueEl.textContent =
-    String(m).padStart(2, "0") + ":" + String(s).padStart(2, "0");
-  timerModeLabelEl.textContent =
-    timerState.mode === "focus" ? "專注時間" : "休息時間";
-}
-
-function startTimer() {
-  if (timerState.running) return;
-  timerState.running = true;
-
-  if (!timerState.timerId) {
-    timerState.timerId = setInterval(() => {
-      timerState.remainingSeconds--;
-      if (timerState.remainingSeconds <= 0) {
-        handleTimerFinished();
-      }
-      updateTimerDisplay();
-    }, 1000);
-  }
-}
-
-function pauseTimer() {
-  timerState.running = false;
-  if (timerState.timerId) {
-    clearInterval(timerState.timerId);
-    timerState.timerId = null;
-  }
-}
-
-function resetTimer() {
-  pauseTimer();
-  const mins =
-    timerState.mode === "focus"
-      ? appData.settings.focusMinutes
-      : appData.settings.breakMinutes;
-  timerState.remainingSeconds = mins * 60;
-  updateTimerDisplay();
-}
-
-function handleTimerFinished() {
-  pauseTimer();
-
-  appData.pomodoroHistory.push({
-    id: createId("p"),
-    taskId: currentTaskIdForPomodoro,
-    mode: timerState.mode,
-    duration:
-      (timerState.mode === "focus"
-        ? appData.settings.focusMinutes
-        : appData.settings.breakMinutes) * 60,
-    finishedAt: new Date().toISOString(),
-  });
-  saveData();
-
-  if (timerState.mode === "focus") {
-    timerState.mode = "break";
-    timerState.remainingSeconds = appData.settings.breakMinutes * 60;
-    showToast("專注結束，休息一下！");
-  } else {
-    timerState.mode = "focus";
-    timerState.remainingSeconds = appData.settings.focusMinutes * 60;
-    showToast("休息結束，回來工作吧！");
-  }
-
-  updateTimerDisplay();
-}
-
-startTimerBtn.addEventListener("click", startTimer);
-pauseTimerBtn.addEventListener("click", pauseTimer);
-resetTimerBtn.addEventListener("click", resetTimer);
-
-/* 設定儲存 */
-saveSettingsBtn.addEventListener("click", () => {
-  const focusMins = parseInt(focusMinutesInput.value, 10);
-  const breakMins = parseInt(breakMinutesInput.value, 10);
-
-  if (!focusMins || focusMins <= 0 || !breakMins || breakMins <= 0) {
-    showToast("請輸入有效的分鐘數（>0）");
-    return;
-  }
-
-  appData.settings.focusMinutes = focusMins;
-  appData.settings.breakMinutes = breakMins;
-  saveData();
-  resetTimer();
-  showToast("番茄鐘設定已更新");
-});
-
-/* ======================================================
-   Import / Export JSON
-====================================================== */
-exportJsonBtn.addEventListener("click", () => {
-  const blob = new Blob([JSON.stringify(appData, null, 2)], {
-    type: "application/json",
-  });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = "time-manager-data.json";
-  a.click();
-  URL.revokeObjectURL(url);
-});
-
-importJsonInput.addEventListener("change", (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
-
-  const reader = new FileReader();
-  reader.onload = (event) => {
+let saveServerTimeout = null;
+function scheduleSaveDataToServer() {
+  if (!authState.token) return;
+  if (saveServerTimeout) clearTimeout(saveServerTimeout);
+  saveServerTimeout = setTimeout(async () => {
     try {
-      const parsed = JSON.parse(event.target.result);
-      appData = { ...appData, ...parsed };
-      saveData();
-      afterDataLoaded();
-      showToast("匯入成功");
+      await apiRequest("/data/full", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${authState.token}` },
+        body: JSON.stringify(appData),
+      });
     } catch (err) {
-      console.error(err);
-      showToast("匯入失敗：JSON 格式錯誤");
+      console.warn("Sync failed", err);
+      showToast("雲端同步失敗（稍後重試）");
     }
-  };
-  reader.readAsText(file);
-});
-
-/* ======================================================
-   Auth：登入 / 註冊（Modal）
-====================================================== */
-let authModalMode = "login"; // "login" 或 "register"
-
-function setAuthModalMode(mode) {
-  authModalMode = mode;
-  if (mode === "login") {
-    authModalTitleEl.textContent = "登入";
-    authNameGroupEl.style.display = "none";
-    authSubmitBtnEl.textContent = "登入";
-    authToggleLabelEl.textContent = "還沒有帳號？";
-    authToggleBtnEl.textContent = "建立帳號";
-  } else {
-    authModalTitleEl.textContent = "建立帳號";
-    authNameGroupEl.style.display = "block";
-    authSubmitBtnEl.textContent = "註冊";
-    authToggleLabelEl.textContent = "已經有帳號？";
-    authToggleBtnEl.textContent = "改為登入";
-  }
+  }, 1000);
 }
 
-function openAuthModal(initialMode = "login") {
-  setAuthModalMode(initialMode);
-  authNameInputEl.value = "";
-  authEmailInputEl.value = "";
-  authPasswordInputEl.value = "";
-  authModalEl.classList.remove("hidden");
-}
-
-function closeAuthModal() {
-  authModalEl.classList.add("hidden");
-}
-
-authToggleBtnEl.addEventListener("click", () => {
-  setAuthModalMode(authModalMode === "login" ? "register" : "login");
-});
-
-authCancelBtnEl.addEventListener("click", () => {
-  closeAuthModal();
-});
-
-/* 後端登入 / 註冊 */
-async function loginWithEmailPassword(email, password) {
-  const data = await apiRequest("/auth/login", {
-    method: "POST",
-    body: JSON.stringify({ email, password }),
+async function loadUserDataFromServer() {
+  if (!authState.token) return;
+  const data = await apiRequest("/data/full", {
+    method: "GET",
+    headers: { Authorization: `Bearer ${authState.token}` },
   });
-
-  authState = {
-    mode: "user",
-    user: data.user,
-    token: data.token,
+  // 確保結構完整
+  appData = { 
+    ...appData, 
+    ...data, 
+    tasks: data.tasks || [], 
+    dailyStats: data.dailyStats || {} 
   };
-  saveAuthState();
-
-  await loadUserDataFromServer();
-}
-
-async function registerWithEmailPassword(name, email, password) {
-  const data = await apiRequest("/auth/register", {
-    method: "POST",
-    body: JSON.stringify({ name, email, password }),
-  });
-
-  authState = {
-    mode: "user",
-    user: data.user,
-    token: data.token,
-  };
-  saveAuthState();
-
-  await apiRequest("/data/full", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${authState.token}`,
-    },
-    body: JSON.stringify(appData),
-  });
-
-  await loadUserDataFromServer();
-}
-
-/* Modal 送出 */
-authSubmitBtnEl.addEventListener("click", async () => {
-  const name = authNameInputEl.value.trim();
-  const email = authEmailInputEl.value.trim();
-  const password = authPasswordInputEl.value;
-
-  if (!email || !password || (authModalMode === "register" && !name)) {
-    showToast("請填寫完整欄位");
-    return;
-  }
-
-  try {
-    if (authModalMode === "login") {
-      await loginWithEmailPassword(email, password);
-      showToast("登入成功");
-    } else {
-      await registerWithEmailPassword(name, email, password);
-      showToast("註冊成功");
-    }
-
-    afterDataLoaded();
-    updateAuthUI();
-    closeAuthModal();
-  } catch (err) {
-    console.error(err);
-    showToast("登入 / 註冊失敗：" + err.message);
-  }
-});
-
-/* Header 登入 / 登出按鈕 */
-authActionBtnEl.addEventListener("click", () => {
-  if (authState.mode === "user") {
-    if (!confirm("確定要登出嗎？")) return;
-
-    authState = { mode: "guest", user: null, token: null };
-    saveAuthState();
-
-    appData = {
-      tasks: [],
-      pomodoroHistory: [],
-      settings: appData.settings,
-      dailyStats: {},
-    };
-    loadGuestData();
-    afterDataLoaded();
-    updateAuthUI();
-    showToast("已登出，回到 Guest 模式");
-  } else {
-    openAuthModal("login");
-  }
-});
-
-/* ======================================================
-   Settings Drawer：修改名稱 / 密碼 / 刪除帳號
-====================================================== */
-openSettingsBtn.addEventListener("click", () => {
-  if (authState.mode !== "user" || !authState.user) {
-    showToast("請先登入帳號才能開啟設定");
-    return;
-  }
-  settingsUserEmailEl.textContent = authState.user.email || "-";
-  settingsUserNameEl.textContent = authState.user.name || "-";
-  settingsDrawerEl.classList.add("open");
-});
-
-closeSettingsBtn.addEventListener("click", () => {
-  settingsDrawerEl.classList.remove("open");
-});
-
-/* 修改名稱：用 prompt（避免需要新增 HTML 欄位） */
-changeNameBtn.addEventListener("click", async () => {
-  if (authState.mode !== "user" || !authState.token) {
-    showToast("請先登入帳號");
-    return;
-  }
-
-  const currentName = authState.user?.name || "";
-  const newNameRaw = prompt("請輸入新名稱：", currentName);
-  if (newNameRaw === null) return; // 使用者按取消
-
-  const newName = newNameRaw.trim();
-  if (!newName) {
-    showToast("名稱不能是空白");
-    return;
-  }
-
-  try {
-    const data = await apiRequest("/auth/update-name", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${authState.token}`,
-      },
-      body: JSON.stringify({ name: newName }),
-    });
-
-    authState.user = data.user;
-    saveAuthState();
-
-    settingsUserNameEl.textContent = data.user.name || "-";
-    updateAuthUI();
-    showToast("名稱已更新");
-  } catch (err) {
-    console.error(err);
-    showToast("更新名稱失敗：" + err.message);
-  }
-});
-
-/* 修改密碼 */
-changePasswordBtn.addEventListener("click", async () => {
-  if (authState.mode !== "user" || !authState.token) {
-    showToast("請先登入帳號");
-    return;
-  }
-  const newPassword = newPasswordInputEl.value;
-  if (!newPassword) {
-    showToast("請輸入新密碼");
-    return;
-  }
-
-  try {
-    await apiRequest("/auth/update-password", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${authState.token}`,
-      },
-      body: JSON.stringify({ password: newPassword }),
-    });
-
-    newPasswordInputEl.value = "";
-    showToast("密碼已更新");
-  } catch (err) {
-    console.error(err);
-    showToast("更新密碼失敗：" + err.message);
-  }
-});
-
-/* 刪除帳號 */
-deleteAccountBtn.addEventListener("click", async () => {
-  if (authState.mode !== "user" || !authState.token) {
-    showToast("尚未登入");
-    return;
-  }
-  if (
-    !confirm(
-      "確定要永久刪除帳號嗎？所有雲端資料將無法恢復，並回到 Guest 模式。"
-    )
-  ) {
-    return;
-  }
-
-  try {
-    await apiRequest("/auth/delete", {
-      method: "DELETE",
-      headers: {
-        Authorization: `Bearer ${authState.token}`,
-      },
-    });
-
-    showToast("帳號已刪除");
-
-    authState = { mode: "guest", user: null, token: null };
-    saveAuthState();
-
-    appData = {
-      tasks: [],
-      pomodoroHistory: [],
-      settings: appData.settings,
-      dailyStats: {},
-    };
-    loadGuestData();
-    afterDataLoaded();
-    updateAuthUI();
-    settingsDrawerEl.classList.remove("open");
-  } catch (err) {
-    console.error(err);
-    showToast("刪除帳號失敗：" + err.message);
-  }
-});
-
-/* ======================================================
-   UI Init
-====================================================== */
-function updateAuthUI() {
-  if (authState.mode === "user" && authState.user) {
-    authStatusLabelEl.textContent = `${authState.user.name}（登入中）`;
-    authActionBtnEl.textContent = "登出";
-
-    settingsUserEmailEl.textContent = authState.user.email || "-";
-    settingsUserNameEl.textContent = authState.user.name || "-";
-  } else {
-    authStatusLabelEl.textContent = "Guest 模式";
-    authActionBtnEl.textContent = "登入 / 註冊";
-
-    settingsUserEmailEl.textContent = "-";
-    settingsUserNameEl.textContent = "-";
-  }
+  localStorage.setItem(LS_USER_CACHE_KEY, JSON.stringify(appData));
 }
 
 /* ======================================================
-   UI Rendering (Task & Chart)
+   UI Rendering (任務與圖表)
 ====================================================== */
-
 function renderTaskList() {
   const listEl = document.getElementById("taskList");
+  if (!listEl) return;
   listEl.innerHTML = "";
 
   const filteredTasks = appData.tasks.filter((t) => {
-    if (currentFilter === "todo") return t.status === "todo";
+    if (currentFilter === "todo") return t.status !== "done";
     if (currentFilter === "done") return t.status === "done";
     return true;
   });
@@ -969,201 +156,229 @@ function renderTaskList() {
   filteredTasks.forEach((task) => {
     const li = document.createElement("li");
     li.className = `task-item ${task.status === "done" ? "done" : ""}`;
-    li.dataset.id = task.id;
+    li.dataset.taskId = task.id;
 
-    // --- 主任務內容 ---
-    const mainContent = document.createElement("div");
-    mainContent.className = "task-main-row";
-    mainContent.innerHTML = `
-      <div class="task-info">
-        <input type="checkbox" ${task.status === "done" ? "checked" : ""} />
-        <span class="task-title">${task.title}</span>
-        <span class="badge ${task.priority}">${task.priority}</span>
-      </div>
+    // 主任務內容
+    const main = document.createElement("div");
+    main.className = "task-main";
+    main.innerHTML = `
+      <input type="checkbox" ${task.status === "done" ? "checked" : ""} />
+      <span class="task-title">${task.title}</span>
+      <span class="badge ${task.priority}">${task.priority}</span>
     `;
 
-    // 勾選任務邏輯
-    mainContent.querySelector("input").onchange = (e) => {
+    main.querySelector("input").onchange = (e) => {
       task.status = e.target.checked ? "done" : "todo";
-      updateDailyStatsOnTaskChange(e.target.checked);
+      updateDailyStatsOnTaskChange();
       saveData();
       renderTaskList();
-      renderTodayStats();
     };
 
-    // --- 子任務區塊 ---
-    const subtaskContainer = document.createElement("div");
-    subtaskContainer.className = "subtask-container";
-    
+    // 子任務區域
+    const subContainer = document.createElement("div");
+    subContainer.className = "subtask-container";
     (task.subtasks || []).forEach((st, idx) => {
-      const stItem = document.createElement("div");
-      stItem.className = "subtask-item";
-      stItem.innerHTML = `
+      const stDiv = document.createElement("div");
+      stDiv.className = "subtask-item";
+      stDiv.innerHTML = `
         <input type="checkbox" ${st.status === 'done' ? 'checked' : ''}>
         <span class="${st.status === 'done' ? 'st-done' : ''}">${st.title}</span>
       `;
-      stItem.querySelector("input").onchange = (e) => {
+      stDiv.querySelector("input").onchange = (e) => {
         task.subtasks[idx].status = e.target.checked ? 'done' : 'todo';
         saveData();
         renderTaskList();
       };
-      subtaskContainer.appendChild(stItem);
+      subContainer.appendChild(stDiv);
     });
 
     const addStInput = document.createElement("input");
-    addStInput.placeholder = "+ 子任務...";
     addStInput.className = "subtask-input";
+    addStInput.placeholder = "+ 子任務 (Enter 新增)";
     addStInput.onkeydown = (e) => {
       if (e.key === 'Enter' && addStInput.value.trim()) {
         if (!task.subtasks) task.subtasks = [];
         task.subtasks.push({ title: addStInput.value.trim(), status: 'todo' });
-        addStInput.value = "";
         saveData();
         renderTaskList();
       }
     };
 
-    // --- 操作按鈕 ---
+    // 按鈕區
     const actions = document.createElement("div");
     actions.className = "task-actions";
+    actions.innerHTML = `<button class="small focus-btn">專注</button>
+                         <button class="danger small">刪除</button>`;
     
-    const focusBtn = document.createElement("button");
-    focusBtn.textContent = "專注";
-    focusBtn.className = "small";
-    focusBtn.onclick = () => {
+    actions.querySelector(".focus-btn").onclick = () => {
       currentTaskIdForPomodoro = task.id;
       updateCurrentTaskLabel();
-      showToast(`正在專注於：${task.title}`);
+      showToast(`已綁定：${task.title}`);
     };
 
-    const delBtn = document.createElement("button");
-    delBtn.textContent = "刪除";
-    delBtn.className = "danger small";
-    delBtn.onclick = () => {
-      appData.tasks = appData.tasks.filter((t) => t.id !== task.id);
-      saveData();
-      renderTaskList();
-      renderTodayStats();
+    actions.querySelector(".danger").onclick = () => {
+      if(confirm("確定刪除？")) {
+        appData.tasks = appData.tasks.filter(t => t.id !== task.id);
+        saveData();
+        renderTaskList();
+      }
     };
 
-    actions.appendChild(focusBtn);
-    actions.appendChild(delBtn);
-
-    li.appendChild(mainContent);
-    li.appendChild(subtaskContainer);
+    li.appendChild(main);
+    li.appendChild(subContainer);
     li.appendChild(addStInput);
     li.appendChild(actions);
     listEl.appendChild(li);
   });
+  renderTodayStats();
+}
+
+function updateDailyStatsOnTaskChange() {
+  const today = new Date().toISOString().slice(0, 10);
+  const todayTasks = appData.tasks.filter(t => t.dueDate === today || !t.dueDate);
+  appData.dailyStats[today] = {
+    done: todayTasks.filter(t => t.status === "done").length,
+    total: todayTasks.length
+  };
+}
+
+function renderWeeklyChart() {
+  const canvas = document.getElementById("weeklyChart");
+  if (!canvas || !window.Chart) return;
+  const ctx = canvas.getContext("2d");
+
+  const labels = [];
+  const counts = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    const dateStr = d.toISOString().slice(0, 10);
+    labels.push(dateStr.slice(5)); 
+    counts.push(appData.dailyStats[dateStr]?.done || 0);
+  }
+
+  if (myChart) myChart.destroy();
+  myChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: labels,
+      datasets: [{ label: '完成數', data: counts, backgroundColor: '#4dabf7' }]
+    },
+    options: { responsive: true, scales: { y: { beginAtZero: true } } }
+  });
 }
 
 function renderTodayStats() {
-  const dateStr = new Date().toISOString().slice(0, 10);
-  const stats = appData.dailyStats[dateStr] || { done: 0, total: 0 };
+  const today = new Date().toISOString().slice(0, 10);
+  const stats = appData.dailyStats[today] || { done: 0, total: 0 };
   const label = document.getElementById("todayStatsLabel");
-  if (label) {
-    label.textContent = `今日進度：${stats.done} / ${stats.total} 任務完成`;
-  }
+  if (label) label.textContent = `今日進度：${stats.done} / ${stats.total}`;
   renderWeeklyChart();
 }
 
 /* ======================================================
-   Auth Handlers (With Merge Logic)
+   Auth Handlers (登入與合併邏輯)
 ====================================================== */
-
 async function handleAuthSubmit() {
-  const modalType = document.getElementById("authModalTitle").textContent;
-  const isLogin = modalType === "登入";
-  const email = document.getElementById("authEmailInput").value;
+  const isLogin = document.getElementById("authModalTitle").textContent === "登入";
+  const email = document.getElementById("authEmailInput").value.trim();
   const password = document.getElementById("authPasswordInput").value;
-  const name = document.getElementById("authNameInput").value;
+  const name = document.getElementById("authNameInput").value.trim();
 
   const endpoint = isLogin ? "/auth/login" : "/auth/register";
   const body = isLogin ? { email, password } : { email, password, name };
 
   try {
-    const res = await fetch(`${API_BASE}${endpoint}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
+    const data = await apiRequest(endpoint, { method: "POST", body: JSON.stringify(body) });
+    
+    // 備份 Guest 資料
+    const guestTasks = [...appData.tasks];
+    
+    authState = { mode: "user", token: data.token, user: data.user };
+    saveAuthState();
 
-    if (res.ok) {
-      const data = await res.json();
-      
-      // ⭐ 核心：備份目前 Guest 模式的任務
-      const guestTasks = [...appData.tasks];
-      
-      authState = { mode: "user", token: data.token, user: data.user };
-      saveAuthState();
+    await loadUserDataFromServer();
 
-      // 載入雲端資料
-      await loadUserDataFromServer();
-
-      // ⭐ 核心：將 Guest 任務併入 User 資料
-      if (guestTasks.length > 0) {
-        const serverIds = new Set(appData.tasks.map(t => t.id));
-        const uniqueGuestTasks = guestTasks.filter(t => !serverIds.has(t.id));
-        appData.tasks = [...appData.tasks, ...uniqueGuestTasks];
-        saveData(); // 合併後同步
-        showToast(`已將 ${uniqueGuestTasks.length} 個本機任務同步至帳號`);
-      }
-
-      closeModal("authModal");
-      afterDataLoaded();
-    } else {
-      const err = await res.json();
-      alert(err.error || "認證失敗");
+    // 合併資料
+    if (guestTasks.length > 0) {
+      const serverIds = new Set(appData.tasks.map(t => t.id));
+      const uniqueTasks = guestTasks.filter(t => !serverIds.has(t.id));
+      appData.tasks = [...appData.tasks, ...uniqueTasks];
+      saveData();
+      showToast(`已同步 ${uniqueTasks.length} 個任務至帳號`);
     }
+
+    document.getElementById("authModal").classList.add("hidden");
+    afterDataLoaded();
+    updateAuthUI();
   } catch (err) {
-    alert("連線伺服器失敗");
+    alert("驗證失敗：" + err.message);
   }
 }
 
-function afterDataLoaded() {
-  focusMinutesInput.value = appData.settings.focusMinutes;
-  breakMinutesInput.value = appData.settings.breakMinutes;
-
-  timerState.mode = "focus";
-  timerState.remainingSeconds = appData.settings.focusMinutes * 60;
-  timerState.running = false;
-  if (timerState.timerId) {
-    clearInterval(timerState.timerId);
-    timerState.timerId = null;
-  }
-  updateTimerDisplay();
-
-  renderTaskList();
-  updateCurrentTaskLabel();
-  initSortable();
+/* ======================================================
+   Pomodoro & Timer
+====================================================== */
+function updateTimerDisplay() {
+  const m = Math.floor(timerState.remainingSeconds / 60);
+  const s = timerState.remainingSeconds % 60;
+  document.getElementById("timerValue").textContent = 
+    `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
-/* 初始化 App */
-async function initApp() {
-  loadAuthState();
+function updateCurrentTaskLabel() {
+  const label = document.getElementById("currentTaskLabel");
+  const task = appData.tasks.find(t => t.id === currentTaskIdForPomodoro);
+  label.textContent = task ? task.title : "尚未選擇任務";
+}
 
-  if (authState.mode === "user" && authState.token) {
-    try {
-      await loadUserDataFromServer();
-    } catch (err) {
-      console.warn("載入雲端資料失敗，改用快取或 Guest：", err.message);
-      const cacheRaw = localStorage.getItem(LS_USER_CACHE_KEY);
-      if (cacheRaw) {
-        appData = { ...appData, ...JSON.parse(cacheRaw) };
-      } else {
-        authState = { mode: "guest", user: null, token: null };
-        saveAuthState();
-        loadGuestData();
-      }
+// 事件綁定 (僅列出核心)
+document.getElementById("authSubmitBtn").onclick = handleAuthSubmit;
+document.getElementById("authActionBtn").onclick = () => {
+  if (authState.mode === "user") {
+    if(confirm("確定登出？")) {
+      authState = { mode: "guest", user: null, token: null };
+      saveAuthState();
+      location.reload(); 
     }
   } else {
-    authState = { mode: "guest", user: null, token: null };
-    saveAuthState();
-    loadGuestData();
+    document.getElementById("authModal").classList.remove("hidden");
   }
+};
 
-  afterDataLoaded();
+/* ======================================================
+   Initialization
+====================================================== */
+function afterDataLoaded() {
+  renderTaskList();
   updateAuthUI();
+  updateTimerDisplay();
 }
 
-initApp();
+function updateAuthUI() {
+  const label = document.getElementById("authStatusLabel");
+  const btn = document.getElementById("authActionBtn");
+  if (authState.mode === "user") {
+    label.textContent = `${authState.user.name} (已登入)`;
+    btn.textContent = "登出";
+  } else {
+    label.textContent = "Guest 模式";
+    btn.textContent = "登入 / 註冊";
+  }
+}
+
+async function initApp() {
+  loadAuthState();
+  if (authState.mode === "user" && authState.token) {
+    try { await loadUserDataFromServer(); } catch(e) {
+      const cache = localStorage.getItem(LS_USER_CACHE_KEY);
+      if (cache) appData = JSON.parse(cache);
+    }
+  } else {
+    const guest = localStorage.getItem(LS_GUEST_KEY);
+    if (guest) appData = JSON.parse(guest);
+  }
+  afterDataLoaded();
+}
+
+window.onload = initApp;
