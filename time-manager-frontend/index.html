@@ -13,8 +13,8 @@
     <header>
       <div class="header-main">
         <div>
-          <h1>Personal Time Manager</h1>
-          <p>任務管理 + 番茄鐘（Guest / Login / 雲端同步）</p>
+          <h1>Personal Learning Manager</h1>
+          <p>任務管理 + 番茄鐘 + 學習進度（Guest / Login / 雲端同步）</p>
         </div>
 
         <div class="user-bar">
@@ -122,10 +122,28 @@
         </div>
       </section>
 
-      <!-- ===== 今日完成度 ===== -->
+      <!-- ===== 今日完成度 + 圖表 ===== -->
       <section class="panel panel-stats">
         <h2>今日完成度統計</h2>
         <p id="todayStatsLabel">今日尚無任務記錄</p>
+        <canvas id="weeklyChart" height="120"></canvas>
+      </section>
+
+      <!-- ===== 學習進度 ===== -->
+      <section class="panel panel-learning">
+        <h2>學習進度</h2>
+        <p id="learningSummaryLabel">尚未建立學習科目</p>
+        <div class="progress-track">
+          <div id="learningProgressBar" class="progress-bar"></div>
+        </div>
+
+        <form id="learningForm">
+          <label>科目名稱 <input type="text" id="subjectNameInput" required /></label>
+          <label>目標分鐘 <input type="number" id="subjectTargetInput" min="1" value="300" required /></label>
+          <button type="submit">新增科目</button>
+        </form>
+
+        <ul id="learningList" class="learning-list"></ul>
       </section>
 
     </main>
@@ -187,7 +205,10 @@
     <button id="closeSettingsBtn" class="secondary" style="margin-top:20px;width:100%">關閉</button>
   </div>
 
+  <div id="toast" class="toast"></div>
+
   <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="main.js"></script>
 </body>
 </html>
