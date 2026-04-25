@@ -2,208 +2,220 @@
 <html lang="zh-Hant">
 <head>
   <meta charset="UTF-8" />
-  <title>Personal Time Manager</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Personal Learning Manager</title>
   <link rel="stylesheet" href="style.css" />
 </head>
-
 <body>
-  <div class="app-container">
-
-    <!-- ================= Header ================= -->
-    <header>
-      <div class="header-main">
-        <div>
-          <h1>Personal Learning Manager</h1>
-          <p>任務管理 + 番茄鐘 + 學習進度（Guest / Login / 雲端同步）</p>
-        </div>
-
-        <div class="user-bar">
-          <span id="authStatusLabel">Guest 模式</span>
-          <button id="authActionBtn">登入 / 註冊</button>
-          <button id="openSettingsBtn" class="secondary small">⚙ 設定</button>
-        </div>
+  <div class="app-shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Study and Work OS</p>
+        <h1>Personal Learning Manager</h1>
+        <p class="subtitle">把今天的任務、專注時間、學習進度與回顧放在同一個工作台。</p>
+      </div>
+      <div class="user-bar">
+        <span id="authStatusLabel">Guest 模式</span>
+        <button id="authActionBtn">登入 / 註冊</button>
+        <button id="openSettingsBtn" class="secondary">帳號</button>
       </div>
     </header>
 
-    <!-- ================= Main ================= -->
-    <main id="mainContent">
-
-      <!-- ===== 任務列表 ===== -->
-      <section class="panel panel-tasks-list">
-        <h2>任務列表</h2>
-
-        <div class="filters">
-          <button data-filter="all" class="filter-btn active">全部</button>
-          <button data-filter="todo" class="filter-btn">未完成</button>
-          <button data-filter="done" class="filter-btn">已完成</button>
+    <main>
+      <section class="today-band">
+        <div class="metric-card">
+          <span>今日任務</span>
+          <strong id="metricTodayTasks">0 / 0</strong>
         </div>
-
-        <ul id="taskList" class="task-list"></ul>
+        <div class="metric-card">
+          <span>今日專注</span>
+          <strong id="metricFocusMinutes">0 分</strong>
+        </div>
+        <div class="metric-card">
+          <span>連續學習</span>
+          <strong id="metricStreak">0 天</strong>
+        </div>
+        <div class="metric-card">
+          <span>本週完成</span>
+          <strong id="metricWeekDone">0 件</strong>
+        </div>
       </section>
 
-      <!-- ===== 任務表單 ===== -->
-      <section class="panel panel-task-form">
-        <h2>新增 / 編輯任務</h2>
-
-        <form id="taskForm">
-          <input type="hidden" id="taskId" />
-
-          <label>標題 <input type="text" id="taskTitle" required /></label>
-
-          <label>描述 <textarea id="taskDescription" rows="3"></textarea></label>
-
-          <label>截止日期 <input type="date" id="taskDueDate" /></label>
-
-          <label>優先度
-            <select id="taskPriority">
-              <option value="low">Low</option>
-              <option value="medium" selected>Medium</option>
-              <option value="high">High</option>
-            </select>
-          </label>
-
-          <label>分類
-            <select id="taskCategory">
-              <option value="">無</option>
-              <option value="school">School</option>
-              <option value="research">Research</option>
-              <option value="game">Game Dev</option>
-              <option value="personal">Personal</option>
-              <option value="study">Study</option>
-            </select>
-          </label>
-
-          <div class="form-actions">
-            <button type="submit">儲存任務</button>
-            <button type="button" id="clearFormBtn" class="secondary">清空</button>
+      <section class="workspace-grid">
+        <section class="panel dashboard-panel">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Today</p>
+              <h2>今日焦點</h2>
+            </div>
+            <button id="selectTopTaskBtn" class="secondary small">自動挑選</button>
           </div>
-        </form>
-
-        <div class="localstorage-actions">
-          <h3>資料備份</h3>
-          <button id="exportJsonBtn">匯出 JSON</button>
-
-          <label class="import-label">
-            匯入 JSON
-            <input type="file" id="importJsonInput" accept=".json" hidden />
+          <div id="focusTaskCard" class="focus-card empty">
+            <p>還沒有焦點任務</p>
+          </div>
+          <label class="reflection-box">
+            今日回顧
+            <textarea id="dailyReflectionInput" rows="4" placeholder="今天完成了什麼？卡在哪裡？下一步是什麼？"></textarea>
           </label>
-        </div>
+          <button id="saveReflectionBtn" class="secondary">儲存回顧</button>
+        </section>
+
+        <section class="panel timer-panel">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Focus</p>
+              <h2>番茄鐘</h2>
+            </div>
+            <span id="timerModeLabel" class="status-pill">專注</span>
+          </div>
+          <p id="currentTaskLabel" class="current-task">尚未選擇任務</p>
+          <div id="timerValue" class="timer-value">25:00</div>
+          <div class="button-row">
+            <button id="startTimerBtn">開始</button>
+            <button id="pauseTimerBtn" class="secondary">暫停</button>
+            <button id="resetTimerBtn" class="secondary">重設</button>
+          </div>
+          <div class="settings-inline">
+            <label>專注分鐘 <input type="number" id="focusMinutesInput" min="1" value="25" /></label>
+            <label>休息分鐘 <input type="number" id="breakMinutesInput" min="1" value="5" /></label>
+            <button id="saveSettingsBtn" class="secondary small">套用</button>
+          </div>
+        </section>
+
+        <section class="panel task-panel">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Tasks</p>
+              <h2>任務清單</h2>
+            </div>
+            <select id="taskFilter">
+              <option value="all">全部</option>
+              <option value="today">今天</option>
+              <option value="todo">待辦</option>
+              <option value="doing">進行中</option>
+              <option value="done">完成</option>
+              <option value="deferred">延後</option>
+              <option value="overdue">已逾期</option>
+            </select>
+          </div>
+          <ul id="taskList" class="task-list"></ul>
+        </section>
+
+        <section class="panel form-panel">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Plan</p>
+              <h2>新增 / 編輯任務</h2>
+            </div>
+            <button id="clearFormBtn" class="secondary small">清空</button>
+          </div>
+          <form id="taskForm" class="form-grid">
+            <input type="hidden" id="taskId" />
+            <label>標題 <input type="text" id="taskTitle" required /></label>
+            <label>描述 <textarea id="taskDescription" rows="3"></textarea></label>
+            <label>截止日 <input type="date" id="taskDueDate" /></label>
+            <label>狀態
+              <select id="taskStatus">
+                <option value="todo">待辦</option>
+                <option value="doing">進行中</option>
+                <option value="done">完成</option>
+                <option value="deferred">延後</option>
+              </select>
+            </label>
+            <label>優先度
+              <select id="taskPriority">
+                <option value="low">低</option>
+                <option value="medium" selected>中</option>
+                <option value="high">高</option>
+              </select>
+            </label>
+            <label>分類
+              <select id="taskCategory">
+                <option value="">未分類</option>
+                <option value="school">學校</option>
+                <option value="research">研究</option>
+                <option value="work">工作</option>
+                <option value="project">專案</option>
+                <option value="personal">個人</option>
+                <option value="study">學習</option>
+              </select>
+            </label>
+            <label>標籤 <input type="text" id="taskTags" placeholder="用逗號分隔，例如 JS, 報告, 英文" /></label>
+            <label>預估分鐘 <input type="number" id="taskEstimate" min="0" value="25" /></label>
+            <button type="submit">儲存任務</button>
+          </form>
+          <div class="backup-actions">
+            <button id="exportJsonBtn" class="secondary">匯出 JSON</button>
+            <label class="file-button">
+              匯入 JSON
+              <input type="file" id="importJsonInput" accept=".json" hidden />
+            </label>
+          </div>
+        </section>
+
+        <section class="panel learning-panel">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Learning</p>
+              <h2>學習計畫</h2>
+            </div>
+            <span id="learningSummaryLabel" class="status-pill">0%</span>
+          </div>
+          <div class="progress-track"><div id="learningProgressBar" class="progress-bar"></div></div>
+          <form id="learningForm" class="form-grid compact">
+            <label>科目 / 主題 <input type="text" id="subjectNameInput" required /></label>
+            <label>目標分鐘 <input type="number" id="subjectTargetInput" min="1" value="300" required /></label>
+            <label>目前單元 <input type="text" id="subjectUnitInput" placeholder="例如 DOM 操作、單字 Chapter 3" /></label>
+            <label>下次複習 <input type="date" id="subjectReviewInput" /></label>
+            <label class="wide">筆記 <textarea id="subjectNoteInput" rows="2"></textarea></label>
+            <button type="submit">新增學習計畫</button>
+          </form>
+          <ul id="learningList" class="learning-list"></ul>
+        </section>
+
+        <section class="panel stats-panel">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Insights</p>
+              <h2>統計</h2>
+            </div>
+          </div>
+          <canvas id="weeklyChart" height="150"></canvas>
+          <div id="categoryStats" class="category-stats"></div>
+          <ul id="pomodoroHistoryList" class="history-list"></ul>
+        </section>
       </section>
-
-      <!-- ===== 番茄鐘 ===== -->
-      <section class="panel panel-pomodoro">
-        <h2>番茄鐘</h2>
-
-        <div class="current-task">
-          <h3>目前專注任務：</h3>
-          <p id="currentTaskLabel">尚未選擇任務</p>
-        </div>
-
-        <div class="timer-display">
-          <span id="timerModeLabel">專注時間</span>
-          <div id="timerValue">25:00</div>
-        </div>
-
-        <div class="timer-controls">
-          <button id="startTimerBtn">Start</button>
-          <button id="pauseTimerBtn" class="secondary">Pause</button>
-          <button id="resetTimerBtn" class="secondary">Reset</button>
-        </div>
-
-        <div class="timer-settings">
-          <h3>設定</h3>
-          <label>專注（分鐘）
-            <input type="number" id="focusMinutesInput" min="1" value="25" />
-          </label>
-          <label>休息（分鐘）
-            <input type="number" id="breakMinutesInput" min="1" value="5" />
-          </label>
-          <button id="saveSettingsBtn">儲存設定</button>
-        </div>
-      </section>
-
-      <!-- ===== 今日完成度 + 圖表 ===== -->
-      <section class="panel panel-stats">
-        <h2>今日完成度統計</h2>
-        <p id="todayStatsLabel">今日尚無任務記錄</p>
-        <canvas id="weeklyChart" height="120"></canvas>
-      </section>
-
-      <!-- ===== 學習進度 ===== -->
-      <section class="panel panel-learning">
-        <h2>學習進度</h2>
-        <p id="learningSummaryLabel">尚未建立學習科目</p>
-        <div class="progress-track">
-          <div id="learningProgressBar" class="progress-bar"></div>
-        </div>
-
-        <form id="learningForm">
-          <label>科目名稱 <input type="text" id="subjectNameInput" required /></label>
-          <label>目標分鐘 <input type="number" id="subjectTargetInput" min="1" value="300" required /></label>
-          <button type="submit">新增科目</button>
-        </form>
-
-        <ul id="learningList" class="learning-list"></ul>
-      </section>
-
     </main>
   </div>
 
-  <!-- ================= Auth Modal ================= -->
   <div id="authModal" class="modal hidden">
     <div class="modal-content">
-      <h2 id="authModalTitle">登入</h2>
-
-      <label id="authNameGroup">
-        名稱
-        <input type="text" id="authNameInput" />
-      </label>
-
-      <label>Email
-        <input type="email" id="authEmailInput" />
-      </label>
-
-      <label>密碼
-        <input type="password" id="authPasswordInput" />
-      </label>
-
-      <div class="modal-actions">
-        <button id="authSubmitBtn">登入</button>
-        <button id="authCancelBtn" class="secondary">取消</button>
+      <div class="section-head">
+        <h2 id="authModalTitle">登入</h2>
+        <button id="authCancelBtn" class="icon-button" aria-label="關閉">X</button>
       </div>
-
-      <p class="modal-toggle-text">
-        <span id="authToggleLabel">還沒有帳號？</span>
-        <button id="authToggleBtn" class="link-button">建立帳號</button>
-      </p>
+      <label id="authNameGroup">姓名 <input type="text" id="authNameInput" /></label>
+      <label>Email <input type="email" id="authEmailInput" /></label>
+      <label>密碼 <input type="password" id="authPasswordInput" /></label>
+      <div class="button-row">
+        <button id="authSubmitBtn">登入</button>
+        <button id="authToggleBtn" class="secondary">建立帳號</button>
+      </div>
     </div>
   </div>
 
-  <!-- ================= Settings Drawer ================= -->
-  <div id="settingsDrawer">
-    <h2>帳號設定</h2>
-
-    <div class="settings-row">
-      <span>Email：</span>
-      <div id="settingsUserEmail">-</div>
+  <aside id="settingsDrawer">
+    <div class="section-head">
+      <h2>帳號設定</h2>
+      <button id="closeSettingsBtn" class="icon-button" aria-label="關閉">X</button>
     </div>
-
-    <div class="settings-row">
-      <span>名稱：</span>
-      <div id="settingsUserName">-</div>
-    </div>
-
-    <button id="changeNameBtn">修改名稱</button>
-
-    <label>修改密碼
-      <input type="password" id="newPasswordInput" placeholder="新密碼" />
-    </label>
-    <button id="changePasswordBtn">更新密碼</button>
-
+    <div class="settings-row"><span>Email</span><strong id="settingsUserEmail">-</strong></div>
+    <div class="settings-row"><span>姓名</span><strong id="settingsUserName">-</strong></div>
+    <button id="changeNameBtn" class="secondary">修改姓名</button>
+    <label>新密碼 <input type="password" id="newPasswordInput" placeholder="至少 8 個字元" /></label>
+    <button id="changePasswordBtn" class="secondary">更新密碼</button>
     <button id="deleteAccountBtn" class="danger">刪除帳號</button>
-
-    <button id="closeSettingsBtn" class="secondary" style="margin-top:20px;width:100%">關閉</button>
-  </div>
+  </aside>
 
   <div id="toast" class="toast"></div>
 
