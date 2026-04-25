@@ -3,221 +3,433 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Personal Learning Manager</title>
+  <title>Focus OS V2 | Personal Learning Manager</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <div class="app-shell">
-    <header class="topbar">
-      <div>
-        <p class="eyebrow">Study and Work OS</p>
-        <h1>Personal Learning Manager</h1>
-        <p class="subtitle">把今天的任務、專注時間、學習進度與回顧放在同一個工作台。</p>
+  <div class="app-layout">
+    <aside class="sidebar" aria-label="主要導覽">
+      <div class="brand-block">
+        <span class="brand-mark">FO</span>
+        <div>
+          <p class="eyebrow">Personal Learning Manager</p>
+          <h1>Focus OS V2</h1>
+        </div>
       </div>
-      <div class="user-bar">
-        <span id="authStatusLabel">Guest 模式</span>
-        <button id="authActionBtn">登入 / 註冊</button>
-        <button id="openSettingsBtn" class="secondary">帳號</button>
-      </div>
-    </header>
 
-    <main>
-      <section class="today-band">
-        <div class="metric-card">
-          <span>今日任務</span>
-          <strong id="metricTodayTasks">0 / 0</strong>
+      <nav class="side-nav">
+        <button class="nav-link active" data-page="dashboard" type="button">Dashboard</button>
+        <button class="nav-link" data-page="focus" type="button">Focus</button>
+        <button class="nav-link" data-page="tasks" type="button">Tasks</button>
+        <button class="nav-link" data-page="learning" type="button">Learning</button>
+        <button class="nav-link" data-page="ai" type="button">AI Assistant</button>
+        <button class="nav-link" data-page="settings" type="button">Settings</button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <span id="authStatusLabel">Guest 模式</span>
+        <button id="authActionBtn" type="button">登入 / 註冊</button>
+      </div>
+    </aside>
+
+    <main class="main-shell">
+      <header class="topbar">
+        <div>
+          <p id="pageEyebrow" class="eyebrow">Dashboard</p>
+          <h2 id="pageTitle">今日總覽</h2>
+          <p id="pageSubtitle" class="subtitle">用數據、任務與專注儀表板，把今天的注意力放到最值得處理的地方。</p>
         </div>
-        <div class="metric-card">
-          <span>今日專注</span>
-          <strong id="metricFocusMinutes">0 分</strong>
+        <div class="topbar-actions">
+          <span id="syncStatusLabel" class="status-pill">Local ready</span>
+          <button id="headerSettingsBtn" class="secondary" type="button">Settings</button>
         </div>
-        <div class="metric-card">
-          <span>連續學習</span>
-          <strong id="metricStreak">0 天</strong>
+      </header>
+
+      <section id="page-dashboard" class="page active" data-page-title="今日總覽" data-page-eyebrow="Dashboard" data-page-subtitle="用數據、任務與專注儀表板，把今天的注意力放到最值得處理的地方。">
+        <div class="metric-grid">
+          <article class="metric-card">
+            <span>今日任務</span>
+            <strong id="metricTodayTasks">0 / 0</strong>
+          </article>
+          <article class="metric-card">
+            <span>今日專注</span>
+            <strong id="metricFocusMinutes">0 分</strong>
+          </article>
+          <article class="metric-card">
+            <span>本週完成</span>
+            <strong id="metricWeekDone">0 件</strong>
+          </article>
+          <article class="metric-card">
+            <span>平均品質</span>
+            <strong id="metricQuality">-</strong>
+          </article>
+          <article class="metric-card">
+            <span>今日分心</span>
+            <strong id="metricDistractions">0 次</strong>
+          </article>
         </div>
-        <div class="metric-card">
-          <span>本週完成</span>
-          <strong id="metricWeekDone">0 件</strong>
+
+        <div class="dashboard-layout">
+          <section class="panel focus-summary-panel">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Next Focus</p>
+                <h3>目前焦點任務</h3>
+              </div>
+              <button id="selectTopTaskBtn" class="secondary small" type="button">智慧挑選</button>
+            </div>
+            <div id="focusTaskCard" class="focus-card empty">
+              <p>尚未指定焦點任務。</p>
+            </div>
+          </section>
+
+          <section class="panel reflection-panel">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Review</p>
+                <h3>今日回顧</h3>
+              </div>
+              <button id="saveReflectionBtn" class="secondary small" type="button">儲存</button>
+            </div>
+            <textarea id="dailyReflectionInput" rows="5" placeholder="今天完成了什麼？哪裡卡住？明天要讓哪件事更順？"></textarea>
+          </section>
+        </div>
+
+        <section class="charts-grid">
+          <article class="panel chart-card">
+            <h3>最近 7 天專注分鐘</h3>
+            <canvas id="focusMinutesChart" height="190"></canvas>
+          </article>
+          <article class="panel chart-card">
+            <h3>最近 7 天完成任務</h3>
+            <canvas id="completedTasksChart" height="190"></canvas>
+          </article>
+          <article class="panel chart-card">
+            <h3>任務分類時間</h3>
+            <canvas id="categoryTimeChart" height="190"></canvas>
+          </article>
+          <article class="panel chart-card">
+            <h3>預估時間 vs 實際時間</h3>
+            <canvas id="estimateActualChart" height="190"></canvas>
+          </article>
+          <article class="panel chart-card">
+            <h3>每日分心次數</h3>
+            <canvas id="distractionChart" height="190"></canvas>
+          </article>
+          <article class="panel chart-card">
+            <h3>專注品質平均分數</h3>
+            <canvas id="qualityChart" height="190"></canvas>
+          </article>
+          <article class="panel chart-card">
+            <h3>學習科目進度</h3>
+            <canvas id="learningProgressChart" height="190"></canvas>
+          </article>
+          <article class="panel chart-card">
+            <h3>學習熱度圖</h3>
+            <div id="learningHeatmapDashboard" class="heatmap" aria-label="最近學習熱度"></div>
+          </article>
+        </section>
+      </section>
+
+      <section id="page-focus" class="page" data-page-title="Deep Focus Mode" data-page-eyebrow="Focus" data-page-subtitle="只保留焦點任務、計時器、專注控制與分心紀錄，讓畫面幫你降噪。">
+        <div class="focus-mode-shell">
+          <section class="panel deep-focus-panel">
+            <div class="section-head center">
+              <div>
+                <p class="eyebrow">Deep Focus Mode</p>
+                <h3>目前焦點任務</h3>
+              </div>
+              <span id="timerModeLabel" class="status-pill">Focus</span>
+            </div>
+
+            <div id="focusPageTaskCard" class="focus-card empty">
+              <p>請先在 Tasks 或 Dashboard 選擇焦點任務。</p>
+            </div>
+
+            <p id="currentTaskLabel" class="current-task">尚未選擇焦點任務</p>
+            <div id="timerValue" class="timer-value">25:00</div>
+
+            <div class="button-row center">
+              <button id="startTimerBtn" type="button">開始</button>
+              <button id="pauseTimerBtn" class="secondary" type="button">暫停</button>
+              <button id="resetTimerBtn" class="secondary" type="button">重設</button>
+              <button id="endFocusBtn" class="danger" type="button">結束專注</button>
+            </div>
+
+            <label class="distraction-field">
+              分心紀錄
+              <input id="distractionInput" type="text" placeholder="專注中想到雜念時輸入，按 Enter 儲存" />
+            </label>
+            <p id="distractionCountLabel" class="muted">本次分心 0 次</p>
+
+            <form id="focusFeedbackPanel" class="feedback-panel hidden">
+              <div class="section-head">
+                <div>
+                  <p class="eyebrow">Session Feedback</p>
+                  <h3>這次專注的回饋</h3>
+                </div>
+                <span id="focusFeedbackMeta" class="status-pill">0 分鐘</span>
+              </div>
+              <label>
+                focusScore：1 到 5
+                <input id="focusScoreInput" type="number" min="1" max="5" value="4" />
+              </label>
+              <label>
+                summary：這次完成了什麼
+                <textarea id="focusSummaryInput" rows="4" placeholder="簡短記錄成果，讓未來的效率分析更有上下文。"></textarea>
+              </label>
+              <button id="saveFocusFeedbackBtn" type="submit">儲存專注紀錄</button>
+            </form>
+          </section>
         </div>
       </section>
 
-      <section class="workspace-grid">
-        <section class="panel dashboard-panel">
-          <div class="section-head">
-            <div>
-              <p class="eyebrow">Today</p>
-              <h2>今日焦點</h2>
+      <section id="page-tasks" class="page" data-page-title="任務系統" data-page-eyebrow="Tasks" data-page-subtitle="用優先級、能量、任務類型與智慧分數決定下一步，而不是只靠感覺。">
+        <div class="split-layout">
+          <section class="panel">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Task Board</p>
+                <h3>任務清單</h3>
+              </div>
+              <div class="toolbar">
+                <select id="taskFilter" aria-label="任務篩選">
+                  <option value="all">全部</option>
+                  <option value="today">今日</option>
+                  <option value="todo">待辦</option>
+                  <option value="doing">進行中</option>
+                  <option value="done">已完成</option>
+                  <option value="deferred">延後</option>
+                  <option value="overdue">已逾期</option>
+                  <option value="deep">Deep Work</option>
+                  <option value="shallow">Shallow Work</option>
+                </select>
+                <button id="smartSortBtn" class="secondary small" type="button">智慧排序</button>
+              </div>
             </div>
-            <button id="selectTopTaskBtn" class="secondary small">自動挑選</button>
-          </div>
-          <div id="focusTaskCard" class="focus-card empty">
-            <p>還沒有焦點任務</p>
-          </div>
-          <label class="reflection-box">
-            今日回顧
-            <textarea id="dailyReflectionInput" rows="4" placeholder="今天完成了什麼？卡在哪裡？下一步是什麼？"></textarea>
-          </label>
-          <button id="saveReflectionBtn" class="secondary">儲存回顧</button>
-        </section>
+            <ul id="taskList" class="task-list"></ul>
+          </section>
 
-        <section class="panel timer-panel">
-          <div class="section-head">
-            <div>
-              <p class="eyebrow">Focus</p>
-              <h2>番茄鐘</h2>
+          <section class="panel">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Plan</p>
+                <h3>新增 / 編輯任務</h3>
+              </div>
+              <button id="clearFormBtn" class="secondary small" type="button">清空</button>
             </div>
-            <span id="timerModeLabel" class="status-pill">專注</span>
-          </div>
-          <p id="currentTaskLabel" class="current-task">尚未選擇任務</p>
-          <div id="timerValue" class="timer-value">25:00</div>
-          <div class="button-row">
-            <button id="startTimerBtn">開始</button>
-            <button id="pauseTimerBtn" class="secondary">暫停</button>
-            <button id="resetTimerBtn" class="secondary">重設</button>
-          </div>
-          <div class="settings-inline">
-            <label>專注分鐘 <input type="number" id="focusMinutesInput" min="1" value="25" /></label>
-            <label>休息分鐘 <input type="number" id="breakMinutesInput" min="1" value="5" /></label>
-            <button id="saveSettingsBtn" class="secondary small">套用</button>
-          </div>
-        </section>
+            <form id="taskForm" class="form-grid">
+              <input type="hidden" id="taskId" />
+              <label class="wide">標題 <input type="text" id="taskTitle" required /></label>
+              <label class="wide">描述 <textarea id="taskDescription" rows="3"></textarea></label>
+              <label>期限 <input type="date" id="taskDueDate" /></label>
+              <label>
+                狀態
+                <select id="taskStatus">
+                  <option value="todo">待辦</option>
+                  <option value="doing">進行中</option>
+                  <option value="done">已完成</option>
+                  <option value="deferred">延後</option>
+                </select>
+              </label>
+              <label>
+                優先級
+                <select id="taskPriority">
+                  <option value="low">低</option>
+                  <option value="medium" selected>中</option>
+                  <option value="high">高</option>
+                </select>
+              </label>
+              <label>
+                分類
+                <select id="taskCategory">
+                  <option value="">未分類</option>
+                  <option value="school">學校</option>
+                  <option value="research">研究</option>
+                  <option value="work">工作</option>
+                  <option value="project">專案</option>
+                  <option value="personal">個人</option>
+                  <option value="study">學習</option>
+                </select>
+              </label>
+              <label>
+                能量需求
+                <select id="taskEnergy">
+                  <option value="low">低</option>
+                  <option value="medium" selected>中</option>
+                  <option value="high">高</option>
+                </select>
+              </label>
+              <label>
+                任務類型
+                <select id="taskType">
+                  <option value="deep" selected>Deep</option>
+                  <option value="shallow">Shallow</option>
+                </select>
+              </label>
+              <label>標籤 <input type="text" id="taskTags" placeholder="用逗號分隔，例如：JS, 報告, 考試" /></label>
+              <label>預估分鐘 <input type="number" id="taskEstimate" min="0" value="25" /></label>
+              <button class="wide" type="submit">儲存任務</button>
+            </form>
+          </section>
+        </div>
+      </section>
 
-        <section class="panel task-panel">
-          <div class="section-head">
-            <div>
-              <p class="eyebrow">Tasks</p>
-              <h2>任務清單</h2>
+      <section id="page-learning" class="page" data-page-title="學習計畫" data-page-eyebrow="Learning" data-page-subtitle="把科目進度、複習間隔與學習熱度集中管理，讓記憶曲線變得可操作。">
+        <div class="learning-layout">
+          <section class="panel">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Progress</p>
+                <h3>學習總進度</h3>
+              </div>
+              <span id="learningSummaryLabel" class="status-pill">0%</span>
             </div>
-            <select id="taskFilter">
-              <option value="all">全部</option>
-              <option value="today">今天</option>
-              <option value="todo">待辦</option>
-              <option value="doing">進行中</option>
-              <option value="done">完成</option>
-              <option value="deferred">延後</option>
-              <option value="overdue">已逾期</option>
-            </select>
-          </div>
-          <ul id="taskList" class="task-list"></ul>
-        </section>
+            <div class="progress-track"><div id="learningProgressBar" class="progress-bar"></div></div>
+            <canvas id="learningSubjectChart" height="180"></canvas>
+            <div id="learningHeatmapLearning" class="heatmap spacious" aria-label="學習熱度圖"></div>
+          </section>
 
-        <section class="panel form-panel">
-          <div class="section-head">
-            <div>
-              <p class="eyebrow">Plan</p>
-              <h2>新增 / 編輯任務</h2>
+          <section class="panel">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Subject</p>
+                <h3>新增學習科目</h3>
+              </div>
             </div>
-            <button id="clearFormBtn" class="secondary small">清空</button>
-          </div>
-          <form id="taskForm" class="form-grid">
-            <input type="hidden" id="taskId" />
-            <label>標題 <input type="text" id="taskTitle" required /></label>
-            <label>描述 <textarea id="taskDescription" rows="3"></textarea></label>
-            <label>截止日 <input type="date" id="taskDueDate" /></label>
-            <label>狀態
-              <select id="taskStatus">
-                <option value="todo">待辦</option>
-                <option value="doing">進行中</option>
-                <option value="done">完成</option>
-                <option value="deferred">延後</option>
-              </select>
-            </label>
-            <label>優先度
-              <select id="taskPriority">
-                <option value="low">低</option>
-                <option value="medium" selected>中</option>
-                <option value="high">高</option>
-              </select>
-            </label>
-            <label>分類
-              <select id="taskCategory">
-                <option value="">未分類</option>
-                <option value="school">學校</option>
-                <option value="research">研究</option>
-                <option value="work">工作</option>
-                <option value="project">專案</option>
-                <option value="personal">個人</option>
-                <option value="study">學習</option>
-              </select>
-            </label>
-            <label>標籤 <input type="text" id="taskTags" placeholder="用逗號分隔，例如 JS, 報告, 英文" /></label>
-            <label>預估分鐘 <input type="number" id="taskEstimate" min="0" value="25" /></label>
-            <button type="submit">儲存任務</button>
-          </form>
-          <div class="backup-actions">
-            <button id="exportJsonBtn" class="secondary">匯出 JSON</button>
-            <label class="file-button">
-              匯入 JSON
-              <input type="file" id="importJsonInput" accept=".json" hidden />
-            </label>
-          </div>
-        </section>
+            <form id="learningForm" class="form-grid compact">
+              <label>科目 / 主題 <input type="text" id="subjectNameInput" required /></label>
+              <label>目標分鐘 <input type="number" id="subjectTargetInput" min="1" value="300" required /></label>
+              <label>目前單元 <input type="text" id="subjectUnitInput" placeholder="例如：DOM 事件、Chapter 3" /></label>
+              <label>下次複習 <input type="date" id="subjectReviewInput" /></label>
+              <label>interval <input type="number" id="subjectIntervalInput" min="1" value="1" /></label>
+              <label>easeFactor <input type="number" id="subjectEaseInput" min="1.3" step="0.1" value="2.5" /></label>
+              <label class="wide">備註 <textarea id="subjectNoteInput" rows="2"></textarea></label>
+              <button class="wide" type="submit">新增學習計畫</button>
+            </form>
+          </section>
+        </div>
 
-        <section class="panel learning-panel">
+        <section class="panel">
           <div class="section-head">
             <div>
-              <p class="eyebrow">Learning</p>
-              <h2>學習計畫</h2>
+              <p class="eyebrow">Review Queue</p>
+              <h3>科目清單</h3>
             </div>
-            <span id="learningSummaryLabel" class="status-pill">0%</span>
           </div>
-          <div class="progress-track"><div id="learningProgressBar" class="progress-bar"></div></div>
-          <form id="learningForm" class="form-grid compact">
-            <label>科目 / 主題 <input type="text" id="subjectNameInput" required /></label>
-            <label>目標分鐘 <input type="number" id="subjectTargetInput" min="1" value="300" required /></label>
-            <label>目前單元 <input type="text" id="subjectUnitInput" placeholder="例如 DOM 操作、單字 Chapter 3" /></label>
-            <label>下次複習 <input type="date" id="subjectReviewInput" /></label>
-            <label class="wide">筆記 <textarea id="subjectNoteInput" rows="2"></textarea></label>
-            <button type="submit">新增學習計畫</button>
-          </form>
           <ul id="learningList" class="learning-list"></ul>
         </section>
+      </section>
 
-        <section class="panel stats-panel">
-          <div class="section-head">
-            <div>
-              <p class="eyebrow">Insights</p>
-              <h2>統計</h2>
+      <section id="page-ai" class="page" data-page-title="AI Assistant" data-page-eyebrow="AI" data-page-subtitle="先以 mock 回應建立前端資料流程，未來可把 requestAI 改接後端或 OpenAI API。">
+        <div class="ai-layout">
+          <section class="panel">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Actions</p>
+                <h3>AI 輔助入口</h3>
+              </div>
             </div>
-          </div>
-          <canvas id="weeklyChart" height="150"></canvas>
-          <div id="categoryStats" class="category-stats"></div>
-          <ul id="pomodoroHistoryList" class="history-list"></ul>
-        </section>
+            <div class="ai-actions">
+              <button class="ai-action" data-ai-action="plan-day" type="button">幫我安排今天</button>
+              <button class="ai-action" data-ai-action="suggest-task" type="button">幫我挑下一個任務</button>
+              <button class="ai-action" data-ai-action="breakdown-task" type="button">幫我拆解目前任務</button>
+              <button class="ai-action" data-ai-action="analyze" type="button">分析我的效率</button>
+            </div>
+          </section>
+
+          <section class="panel ai-result-panel">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Result</p>
+                <h3>AI 回應</h3>
+              </div>
+              <span id="aiResultSource" class="status-pill">Mock ready</span>
+            </div>
+            <div id="aiResult" class="ai-result empty-state">選擇一個 AI 動作後，結果會顯示在這裡。</div>
+          </section>
+
+          <section class="panel ai-log-panel">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Logs</p>
+                <h3>AI Logs</h3>
+              </div>
+            </div>
+            <ul id="aiLogsList" class="history-list"></ul>
+          </section>
+        </div>
+      </section>
+
+      <section id="page-settings" class="page" data-page-title="設定與資料" data-page-eyebrow="Settings" data-page-subtitle="管理帳號、Focus 時長與 JSON 匯入匯出；Guest 與登入同步都保留。">
+        <div class="settings-layout">
+          <section class="panel">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Account</p>
+                <h3>帳號資訊</h3>
+              </div>
+            </div>
+            <div class="settings-row"><span>Email</span><strong id="settingsUserEmail">-</strong></div>
+            <div class="settings-row"><span>名稱</span><strong id="settingsUserName">-</strong></div>
+            <button id="changeNameBtn" class="secondary" type="button">變更名稱</button>
+            <label>新密碼 <input type="password" id="newPasswordInput" placeholder="至少 8 個字元" /></label>
+            <button id="changePasswordBtn" class="secondary" type="button">變更密碼</button>
+            <button id="deleteAccountBtn" class="danger" type="button">刪除帳號</button>
+          </section>
+
+          <section class="panel">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Timer</p>
+                <h3>專注設定</h3>
+              </div>
+            </div>
+            <div class="form-grid compact">
+              <label>專注分鐘 <input type="number" id="focusMinutesInput" min="1" value="25" /></label>
+              <label>休息分鐘 <input type="number" id="breakMinutesInput" min="1" value="5" /></label>
+              <button id="saveSettingsBtn" class="wide" type="button">儲存設定</button>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Backup</p>
+                <h3>JSON 匯入 / 匯出</h3>
+              </div>
+            </div>
+            <div class="backup-actions">
+              <button id="exportJsonBtn" class="secondary" type="button">匯出 JSON</button>
+              <label class="file-button">
+                匯入 JSON
+                <input type="file" id="importJsonInput" accept=".json" hidden />
+              </label>
+            </div>
+            <p class="muted">目前 API：<span id="apiBaseLabel">-</span></p>
+          </section>
+        </div>
       </section>
     </main>
   </div>
 
-  <div id="authModal" class="modal hidden">
+  <div id="authModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="authModalTitle">
     <div class="modal-content">
       <div class="section-head">
         <h2 id="authModalTitle">登入</h2>
-        <button id="authCancelBtn" class="icon-button" aria-label="關閉">X</button>
+        <button id="authCancelBtn" class="icon-button" type="button" aria-label="關閉">X</button>
       </div>
-      <label id="authNameGroup">姓名 <input type="text" id="authNameInput" /></label>
-      <label>Email <input type="email" id="authEmailInput" /></label>
-      <label>密碼 <input type="password" id="authPasswordInput" /></label>
+      <label id="authNameGroup">名稱 <input type="text" id="authNameInput" /></label>
+      <label>Email <input type="email" id="authEmailInput" autocomplete="email" /></label>
+      <label>密碼 <input type="password" id="authPasswordInput" autocomplete="current-password" /></label>
       <div class="button-row">
-        <button id="authSubmitBtn">登入</button>
-        <button id="authToggleBtn" class="secondary">建立帳號</button>
+        <button id="authSubmitBtn" type="button">登入</button>
+        <button id="authToggleBtn" class="secondary" type="button">建立帳號</button>
       </div>
     </div>
   </div>
 
-  <aside id="settingsDrawer">
-    <div class="section-head">
-      <h2>帳號設定</h2>
-      <button id="closeSettingsBtn" class="icon-button" aria-label="關閉">X</button>
-    </div>
-    <div class="settings-row"><span>Email</span><strong id="settingsUserEmail">-</strong></div>
-    <div class="settings-row"><span>姓名</span><strong id="settingsUserName">-</strong></div>
-    <button id="changeNameBtn" class="secondary">修改姓名</button>
-    <label>新密碼 <input type="password" id="newPasswordInput" placeholder="至少 8 個字元" /></label>
-    <button id="changePasswordBtn" class="secondary">更新密碼</button>
-    <button id="deleteAccountBtn" class="danger">刪除帳號</button>
-  </aside>
-
-  <div id="toast" class="toast"></div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
