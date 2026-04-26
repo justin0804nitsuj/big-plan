@@ -120,29 +120,44 @@ function normalizeFriendMeta(meta) {
   const value = meta && typeof meta === "object" ? meta : {};
   return Object.fromEntries(Object.entries(value).map(([friendId, item]) => [
     friendId,
-    {
-      nickname: String(item?.nickname || "").slice(0, 80),
-      note: String(item?.note || "").slice(0, 500)
-    }
+    item && typeof item === "object"
+      ? {
+          ...item,
+          nickname: String(item.nickname || "").slice(0, 80),
+          note: String(item.note || "").slice(0, 500)
+        }
+      : { nickname: "", note: "" }
   ]));
 }
 
-function normalizeUserAccount(user) {
+function normalizeUser(user) {
+  const value = user && typeof user === "object" ? user : {};
   return {
-    ...user,
-    friends: uniqueStrings(user?.friends),
-    incomingRequests: uniqueStrings(user?.incomingRequests),
-    outgoingRequests: uniqueStrings(user?.outgoingRequests),
-    friendMeta: normalizeFriendMeta(user?.friendMeta)
+    ...value,
+    id: value.id,
+    name: value.name,
+    email: value.email,
+    passwordHash: value.passwordHash,
+    createdAt: value.createdAt,
+    friends: uniqueStrings(value.friends),
+    incomingRequests: uniqueStrings(value.incomingRequests),
+    outgoingRequests: uniqueStrings(value.outgoingRequests),
+    friendMeta: normalizeFriendMeta(value.friendMeta)
   };
 }
 
 function loadUsers() {
-  return safeReadJSON(USERS_FILE, []).map(normalizeUserAccount);
+  const raw = safeReadJSON(USERS_FILE, []);
+  const users = Array.isArray(raw) ? raw : [];
+  const normalized = users.map(normalizeUser);
+  if (JSON.stringify(users) !== JSON.stringify(normalized)) {
+    safeWriteJSON(USERS_FILE, normalized);
+  }
+  return normalized;
 }
 
 function saveUsers(users) {
-  safeWriteJSON(USERS_FILE, users.map(normalizeUserAccount));
+  safeWriteJSON(USERS_FILE, (Array.isArray(users) ? users : []).map(normalizeUser));
 }
 
 function getUserDataFile(userId) {
@@ -222,6 +237,7 @@ function publicFriend(user, viewer) {
     originalName: user.name,
     nickname: meta.nickname || "",
     note: meta.note || "",
+    friendMeta: meta,
     today: getTodayFriendStats(user.id)
   };
 }
