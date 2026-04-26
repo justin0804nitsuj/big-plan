@@ -18,9 +18,12 @@ const USERS_FILE = path.join(DB_DIR, "users.json");
 const MESSAGES_FILE = path.join(DB_DIR, "messages.json");
 const SHARED_TASKS_FILE = path.join(DB_DIR, "sharedTasks.json");
 const FOCUS_ROOMS_FILE = path.join(DB_DIR, "focusRooms.json");
+const GROUPS_FILE = path.join(DB_DIR, "groups.json");
 const USERDATA_DIR = path.join(DB_DIR, "userdata");
 const UPLOADS_DIR = path.join(__dirname, "uploads");
 const CHAT_UPLOADS_DIR = path.join(UPLOADS_DIR, "chat");
+const THREADS_FILE = path.join(DB_DIR, "threads.json");
+const THREAD_REPLIES_FILE = path.join(DB_DIR, "threadReplies.json");
 
 ensureDir(DB_DIR);
 ensureDir(USERDATA_DIR);
@@ -29,6 +32,9 @@ ensureFile(USERS_FILE, []);
 ensureFile(MESSAGES_FILE, []);
 ensureFile(SHARED_TASKS_FILE, []);
 ensureFile(FOCUS_ROOMS_FILE, []);
+ensureFile(GROUPS_FILE, []);
+ensureFile(THREADS_FILE, []);
+ensureFile(THREAD_REPLIES_FILE, []);
 
 const allowedOrigins = (process.env.CORS_ORIGIN || "")
   .split(",")
@@ -262,8 +268,33 @@ function createChatMessage({ senderId, receiverId, type = "text", content = "", 
   return message;
 }
 
-function emitChatMessage(message) {
-  if (typeof io !== "undefined") io.to(message.roomId).emit("message:new", message);
+function getGroupRoomId(groupId) {
+  return `group_${groupId}`;
+}
+
+function getGroupMessages(groupId, limit = 100) {
+  const roomId = getGroupRoomId(groupId);
+  return loadMessages()
+    .filter((message) => message.roomId === roomId)
+    .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))
+    .slice(-limit);
+}
+
+function createGroupMessage({ groupId, senderId, type = "text", content = "", imageUrl = "" }) {
+  const message = normalizeMessage({
+    id: createId("msg"),
+    roomId: getGroupRoomId(groupId),
+    senderId,
+    receiverId: "", // 群組訊息沒有 receiverId
+    type,
+    content,
+    imageUrl,
+    createdAt: new Date().toISOString()
+  });
+  const messages = loadMessages();
+  messages.push(message);
+  saveMessages(messages);
+  return message;
 }
 
 function loadSharedTasks() {
@@ -280,6 +311,1035 @@ function loadFocusRooms() {
 
 function saveFocusRooms(rooms) {
   safeWriteJSON(FOCUS_ROOMS_FILE, rooms);
+}
+
+function loadGroups() {
+  const raw = safeReadJSON(GROUPS_FILE, []);
+  const groups = Array.isArray(raw) ? raw : [];
+  const normalized = groups.map(normalizeGroup);
+  if (JSON.stringify(groups) !== JSON.stringify(normalized)) {
+    safeWriteJSON(GROUPS_FILE, normalized);
+  }
+  return normalized;
+}
+
+function saveGroups(groups) {
+  safeWriteJSON(GROUPS_FILE, (Array.isArray(groups) ? groups : []).map(normalizeGroup));
+}
+
+function normalizeGroup(group) {
+  const value = group && typeof group === "object" ? group : {};
+  return {
+    id: value.id,
+    name: String(value.name || "").trim().slice(0, 40),
+    description: String(value.description || "").trim().slice(0, 200),
+    ownerId: value.ownerId,
+    memberIds: uniqueStrings(value.memberIds),
+    createdAt: value.createdAt,
+    updatedAt: value.updatedAt || new Date().toISOString()
+  };
+}
+
+function normalizeThread(thread) {
+  const value = thread && typeof thread === "object" ? thread : {};
+  return {
+    id: value.id || createId("thread"),
+    authorId: String(value.authorId || ""),
+    title: String(value.title || "").trim().slice(0, 80),
+    content: String(value.content || "").trim().slice(0, 3000),
+    subject: String(value.subject || "").trim(),
+    tags: uniqueStrings(Array.isArray(value.tags) ? value.tags : String(value.tags || "").split(",").map((tag) => tag.trim()).filter(Boolean)),
+    imageUrls: Array.isArray(value.imageUrls) ? value.imageUrls.map(String).slice(0, 4) : [],
+    status: value.status === "solved" ? "solved" : "open",
+    acceptedReplyId: value.acceptedReplyId || null,
+    createdAt: value.createdAt || new Date().toISOString(),
+    updatedAt: value.updatedAt || new Date().toISOString()
+  };
+}
+
+function normalizeThreadReply(reply) {
+  const value = reply && typeof reply === "object" ? reply : {};
+  return {
+    id: value.id || createId("reply"),
+    threadId: String(value.threadId || ""),
+    authorId: String(value.authorId || ""),
+    content: String(value.content || "").trim().slice(0, 3000),
+    imageUrls: Array.isArray(value.imageUrls) ? value.imageUrls.map(String).slice(0, 4) : [],
+    createdAt: value.createdAt || new Date().toISOString(),
+    updatedAt: value.updatedAt || new Date().toISOString()
+  };
+}
+
+function loadThreads() {
+  const raw = safeReadJSON(THREADS_FILE, []);
+  const threads = Array.isArray(raw) ? raw : [];
+  const normalized = threads.map(normalizeThread);
+  if (JSON.stringify(threads) !== JSON.stringify(normalized)) {
+    safeWriteJSON(THREADS_FILE, normalized);
+  }
+  return normalized;
+}
+
+function saveThreads(threads) {
+  safeWriteJSON(THREADS_FILE, (Array.isArray(threads) ? threads : []).map(normalizeThread));
+}
+
+function loadThreadReplies() {
+  const raw = safeReadJSON(THREAD_REPLIES_FILE, []);
+  const replies = Array.isArray(raw) ? raw : [];
+  const normalized = replies.map(normalizeThreadReply);
+  if (JSON.stringify(replies) !== JSON.stringify(normalized)) {
+    safeWriteJSON(THREAD_REPLIES_FILE, normalized);
+  }
+  return normalized;
+}
+
+function saveThreadReplies(replies) {
+  safeWriteJSON(THREAD_REPLIES_FILE, (Array.isArray(replies) ? replies : []).map(normalizeThreadReply));
+}
+
+function getThreadById(threadId) {
+  return loadThreads().find((item) => item.id === String(threadId || ""));
+}
+
+function getRepliesByThreadId(threadId) {
+  return loadThreadReplies()
+    .filter((reply) => reply.threadId === String(threadId || ""))
+    .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+}
+
+function buildThreadSummary(thread) {
+  const users = loadUsers();
+  return {
+    id: thread.id,
+    author: publicUser(getUserById(users, thread.authorId) || { id: thread.authorId, name: "Unknown", email: "" }),
+    title: thread.title,
+    content: thread.content,
+    subject: thread.subject,
+    tags: thread.tags,
+    imageUrls: thread.imageUrls,
+    status: thread.status,
+    acceptedReplyId: thread.acceptedReplyId,
+    replyCount: getRepliesByThreadId(thread.id).length,
+    createdAt: thread.createdAt,
+    updatedAt: thread.updatedAt
+  };
+}
+
+function buildThreadDetail(thread) {
+  const users = loadUsers();
+  const author = publicUser(getUserById(users, thread.authorId) || { id: thread.authorId, name: "Unknown", email: "" });
+  const replies = getRepliesByThreadId(thread.id).map((reply) => ({
+    ...reply,
+    author: publicUser(getUserById(users, reply.authorId) || { id: reply.authorId, name: "Unknown", email: "" })
+  }));
+
+  return {
+    ...thread,
+    author,
+    replies
+  };
+}
+
+function parseThreadTags(rawTags) {
+  return uniqueStrings(String(rawTags || "").split(",").map((tag) => tag.trim()).filter(Boolean));
+}
+
+function threadUploadErrorMessage(uploadErr) {
+  if (!uploadErr) return null;
+  if (uploadErr.code === "LIMIT_FILE_SIZE") return "圖片大小不可超過 10MB";
+  if (uploadErr.code === "LIMIT_UNEXPECTED_FILE") return "最多只能上傳 4 張圖片";
+  return uploadErr.message || "圖片上傳失敗";
+}
+
+function removeUploadedFiles(files) {
+  (Array.isArray(files) ? files : []).forEach((file) => {
+    if (file?.path && fs.existsSync(file.path)) fs.unlinkSync(file.path);
+  });
+}
+
+function collectThreadImageUrls(files) {
+  return (Array.isArray(files) ? files : []).slice(0, 4).map((file) => `/uploads/chat/${file.filename}`);
+}
+
+function validateThreadStatus(status) {
+  return status === "open" || status === "solved";
+}
+
+function publicUserSafe(user) {
+  return publicUser(user);
+}
+
+function getThreadAuthor(thread) {
+  const users = loadUsers();
+  return getUserById(users, thread.authorId) || { id: thread.authorId, name: "Unknown", email: "" };
+}
+
+function buildThreadResponse(thread) {
+  const author = publicUserSafe(getThreadAuthor(thread));
+  const replyCount = getRepliesByThreadId(thread.id).length;
+  return { ...thread, author, replyCount };
+}
+
+function buildThreadDetailResponse(thread) {
+  const author = publicUserSafe(getThreadAuthor(thread));
+  const replies = getRepliesByThreadId(thread.id).map((reply) => ({
+    ...reply,
+    author: publicUserSafe(getUserById(loadUsers(), reply.authorId) || { id: reply.authorId, name: "Unknown", email: "" })
+  }));
+  return { ...thread, author, replies };
+}
+
+function normalizeThreadFields(fields) {
+  return {
+    title: String(fields.title || "").trim().slice(0, 80),
+    content: String(fields.content || "").trim().slice(0, 3000),
+    subject: String(fields.subject || "").trim(),
+    tags: parseThreadTags(fields.tags),
+    imageUrls: collectThreadImageUrls(fields.files)
+  };
+}
+
+function isThreadOwner(thread, userId) {
+  return thread.authorId === String(userId || "");
+}
+
+function parseThreadBodyString(value) {
+  return String(value || "").trim();
+}
+
+function filterThreadsByQuery(threads, query) {
+  const subject = String(query.subject || "").trim().toLowerCase();
+  const status = String(query.status || "").trim().toLowerCase();
+  const q = String(query.q || "").trim().toLowerCase();
+  const tag = String(query.tag || "").trim().toLowerCase();
+
+  return threads.filter((thread) => {
+    if (subject && String(thread.subject || "").toLowerCase() !== subject) return false;
+    if (status && String(thread.status || "").toLowerCase() !== status) return false;
+    if (tag && !thread.tags.some((item) => String(item || "").toLowerCase() === tag)) return false;
+    if (q) {
+      const title = String(thread.title || "").toLowerCase();
+      const content = String(thread.content || "").toLowerCase();
+      if (!title.includes(q) && !content.includes(q)) return false;
+    }
+    return true;
+  });
+}
+
+function cleanupThreadFiles(files) {
+  removeUploadedFiles(files);
+}
+
+function handleThreadUploadArray(fieldName, maxCount) {
+  return (req, res, next) => {
+    upload.array(fieldName, maxCount)(req, res, (uploadErr) => {
+      if (uploadErr) {
+        const message = threadUploadErrorMessage(uploadErr);
+        cleanupThreadFiles(req.files);
+        return res.status(400).json({ error: message });
+      }
+      next();
+    });
+  };
+}
+
+function validateThreadPayload(req, res) {
+  const title = String(req.body?.title || "").trim();
+  const content = String(req.body?.content || "").trim();
+  if (!title || title.length > 80) {
+    cleanupThreadFiles(req.files);
+    res.status(400).json({ error: "標題長度需為 1~80 字" });
+    return false;
+  }
+  if (!content || content.length > 3000) {
+    cleanupThreadFiles(req.files);
+    res.status(400).json({ error: "內容長度需為 1~3000 字" });
+    return false;
+  }
+  return true;
+}
+
+function validateReplyPayload(req, res) {
+  const content = String(req.body?.content || "").trim();
+  if (!content || content.length > 3000) {
+    cleanupThreadFiles(req.files);
+    res.status(400).json({ error: "回覆內容長度需為 1~3000 字" });
+    return false;
+  }
+  return true;
+}
+
+function sanitizeTags(rawTags) {
+  return parseThreadTags(rawTags).slice(0, 20);
+}
+
+function threadCreatePayload(req) {
+  return {
+    title: String(req.body?.title || "").trim().slice(0, 80),
+    content: String(req.body?.content || "").trim().slice(0, 3000),
+    subject: String(req.body?.subject || "").trim(),
+    tags: sanitizeTags(req.body?.tags),
+    imageUrls: collectThreadImageUrls(req.files)
+  };
+}
+
+function replyCreatePayload(req, threadId) {
+  return {
+    threadId: String(threadId || ""),
+    authorId: req.userId,
+    content: String(req.body?.content || "").trim().slice(0, 3000),
+    imageUrls: collectThreadImageUrls(req.files)
+  };
+}
+
+function createThreadResponse(thread) {
+  const author = publicUserSafe(getThreadAuthor(thread));
+  const replyCount = getRepliesByThreadId(thread.id).length;
+  return { ...thread, author, replyCount };
+}
+
+
+function publicThread(thread) {
+  return createThreadResponse(thread);
+}
+
+function publicThreadDetail(thread) {
+  return buildThreadDetailResponse(thread);
+}
+
+function parseThreadStatus(value) {
+  const status = String(value || "").trim().toLowerCase();
+  return status === "solved" ? "solved" : (status === "open" ? "open" : null);
+}
+
+function loadRepliesFromThread(thread) {
+  return getRepliesByThreadId(thread.id);
+}
+
+function getReplyById(replyId) {
+  return loadThreadReplies().find((reply) => reply.id === String(replyId || ""));
+}
+
+function replyBelongsToThread(reply, threadId) {
+  return reply && String(reply.threadId) === String(threadId || "");
+}
+
+function createNewThread(data) {
+  const threads = loadThreads();
+  const thread = normalizeThread({ ...data, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+  threads.push(thread);
+  saveThreads(threads);
+  return thread;
+}
+
+function createNewReply(data) {
+  const replies = loadThreadReplies();
+  const reply = normalizeThreadReply({ ...data, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+  replies.push(reply);
+  saveThreadReplies(replies);
+  return reply;
+}
+
+function buildThreadListResponse(threads) {
+  return threads.map(publicThread);
+}
+
+function updateThread(thread, updates) {
+  const threads = loadThreads();
+  const target = threads.find((item) => item.id === thread.id);
+  if (!target) return null;
+  Object.assign(target, updates, { updatedAt: new Date().toISOString() });
+  saveThreads(threads);
+  return target;
+}
+
+function threadExists(threadId) {
+  return Boolean(getThreadById(threadId));
+}
+
+function replyExistsInThread(threadId, replyId) {
+  return Boolean(getThreadById(threadId) && getReplyById(replyId) && replyBelongsToThread(getReplyById(replyId), threadId));
+}
+
+function getThreadPublicAuthor(thread) {
+  return publicUserSafe(getThreadAuthor(thread));
+}
+
+function getThreadDetailData(threadId) {
+  const thread = getThreadById(threadId);
+  return thread ? buildThreadDetailResponse(thread) : null;
+}
+
+function isValidThreadStatus(status) {
+  return status === "open" || status === "solved";
+}
+
+function updateThreadStatus(thread, status) {
+  thread.status = status;
+  thread.updatedAt = new Date().toISOString();
+  saveThreads(loadThreads().map((item) => item.id === thread.id ? thread : item));
+  return thread;
+}
+
+function updateThreadAcceptedReply(thread, replyId) {
+  thread.acceptedReplyId = String(replyId || "");
+  thread.status = "solved";
+  thread.updatedAt = new Date().toISOString();
+  saveThreads(loadThreads().map((item) => item.id === thread.id ? thread : item));
+  return thread;
+}
+
+function getThreadAuthorPublic(thread) {
+  return publicUserSafe(getThreadAuthor(thread));
+}
+
+function threadListFromQuery(query) {
+  return buildThreadListResponse(filterThreadsByQuery(loadThreads(), query));
+}
+
+function validateThreadCount(files) {
+  return (Array.isArray(files) ? files.length : 0) <= 4;
+}
+
+function validateReplyCount(files) {
+  return (Array.isArray(files) ? files.length : 0) <= 4;
+}
+
+function buildThreadReplyResponse(reply) {
+  const users = loadUsers();
+  return { ...reply, author: publicUserSafe(getUserById(users, reply.authorId) || { id: reply.authorId, name: "Unknown", email: "" }) };
+}
+
+function buildThreadRepliesResponse(replies) {
+  return replies.map(buildThreadReplyResponse);
+}
+
+function sanitizeThreadAuthorFields(thread) {
+  return {
+    ...thread,
+    author: publicUserSafe(getThreadAuthor(thread))
+  };
+}
+
+function getThreadListResult(query) {
+  return buildThreadListResponse(filterThreadsByQuery(loadThreads(), query).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))));
+}
+
+function getThreadRepliesResult(threadId) {
+  return buildThreadRepliesResponse(getRepliesByThreadId(threadId));
+}
+
+function ensureThreadFiles() {
+  ensureFile(THREADS_FILE, []);
+  ensureFile(THREAD_REPLIES_FILE, []);
+}
+
+function createThreadObject(fields) {
+  return normalizeThread({
+    authorId: fields.authorId,
+    title: fields.title,
+    content: fields.content,
+    subject: fields.subject,
+    tags: fields.tags,
+    imageUrls: fields.imageUrls,
+    status: "open",
+    acceptedReplyId: null,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+}
+
+function createReplyObject(fields) {
+  return normalizeThreadReply({
+    threadId: fields.threadId,
+    authorId: fields.authorId,
+    content: fields.content,
+    imageUrls: fields.imageUrls,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+}
+
+function threadAuthorFromThread(thread) {
+  return getThreadAuthor(thread);
+}
+
+function isThreadAuthor(thread, userId) {
+  return String(thread.authorId) === String(userId);
+}
+
+function errorIfNoThread(res, thread) {
+  if (!thread) {
+    res.status(404).json({ error: "找不到討論串" });
+    return true;
+  }
+  return false;
+}
+
+function errorIfNotAuthor(res, thread, userId) {
+  if (!isThreadAuthor(thread, userId)) {
+    res.status(403).json({ error: "只有作者可以執行此操作" });
+    return true;
+  }
+  return false;
+}
+
+function getThreadQueryFilters(query) {
+  return filterThreadsByQuery(loadThreads(), query);
+}
+
+function resolveThreadImageUrls(files) {
+  return collectThreadImageUrls(files);
+}
+
+function threadFilters(query) {
+  return filterThreadsByQuery(loadThreads(), query);
+}
+
+function createThreadId() {
+  return createId("th");
+}
+
+function createReplyId() {
+  return createId("rep");
+}
+
+function validateFieldsString(value) {
+  return String(value || "").trim();
+}
+
+function threadPayload(req) {
+  return {
+    title: validateFieldsString(req.body?.title).slice(0, 80),
+    content: validateFieldsString(req.body?.content).slice(0, 3000),
+    subject: validateFieldsString(req.body?.subject),
+    tags: sanitizeTags(req.body?.tags),
+    imageUrls: resolveThreadImageUrls(req.files)
+  };
+}
+
+function replyPayload(req, threadId) {
+  return {
+    threadId: String(threadId || ""),
+    authorId: req.userId,
+    content: validateFieldsString(req.body?.content).slice(0, 3000),
+    imageUrls: resolveThreadImageUrls(req.files)
+  };
+}
+
+function getThreadWithAuthor(thread) {
+  return buildThreadResponse(thread);
+}
+
+function getThreadDetailWithAuthor(thread) {
+  return buildThreadDetailResponse(thread);
+}
+
+function canUseThreadUpload(files) {
+  return validateThreadCount(files);
+}
+
+function canUseReplyUpload(files) {
+  return validateReplyCount(files);
+}
+
+function buildThreadList(threads) {
+  return threads.map((thread) => buildThreadResponse(thread));
+}
+
+function threadSearch(query) {
+  return getThreadListResult(query);
+}
+
+function loadAllThreads() {
+  return loadThreads();
+}
+
+function loadAllReplies() {
+  return loadThreadReplies();
+}
+
+function getThreadCount() {
+  return loadThreads().length;
+}
+
+function getReplyCount(threadId) {
+  return getRepliesByThreadId(threadId).length;
+}
+
+function createThreadReply(threadId, userId, content, imageUrls) {
+  const reply = normalizeThreadReply({ threadId, authorId: userId, content, imageUrls, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+  const replies = loadThreadReplies();
+  replies.push(reply);
+  saveThreadReplies(replies);
+  return reply;
+}
+
+function saveThread(thread) {
+  const threads = loadThreads();
+  const index = threads.findIndex((item) => item.id === thread.id);
+  if (index === -1) {
+    threads.push(thread);
+  } else {
+    threads[index] = thread;
+  }
+  saveThreads(threads);
+  return thread;
+}
+
+function updateThreadById(threadId, updates) {
+  const threads = loadThreads();
+  const thread = threads.find((item) => item.id === String(threadId || ""));
+  if (!thread) return null;
+  Object.assign(thread, updates, { updatedAt: new Date().toISOString() });
+  saveThreads(threads);
+  return thread;
+}
+
+function removeInvalidThreadFiles(files) {
+  removeUploadedFiles(files);
+}
+
+function createThreadWithAuthor(req) {
+  return createThreadObject(threadPayload(req));
+}
+
+function createReplyForThread(req, threadId) {
+  return createReplyObject(replyPayload(req, threadId));
+}
+
+function addReplyToThread(req, threadId) {
+  const reply = createReplyForThread(req, threadId);
+  const replies = loadThreadReplies();
+  replies.push(reply);
+  saveThreadReplies(replies);
+  return reply;
+}
+
+function threadHasAuthor(thread, userId) {
+  return String(thread.authorId) === String(userId);
+}
+
+function threadCanBeClosed(thread, userId) {
+  return threadHasAuthor(thread, userId);
+}
+
+function threadCanAcceptReply(thread, userId) {
+  return threadHasAuthor(thread, userId);
+}
+
+function threadUpdateStatus(thread, status) {
+  thread.status = status;
+  thread.updatedAt = new Date().toISOString();
+  saveThreads(loadThreads().map((item) => item.id === thread.id ? thread : item));
+  return thread;
+}
+
+function threadMarkAcceptedReply(thread, replyId) {
+  thread.acceptedReplyId = String(replyId || "");
+  thread.status = "solved";
+  thread.updatedAt = new Date().toISOString();
+  saveThreads(loadThreads().map((item) => item.id === thread.id ? thread : item));
+  return thread;
+}
+
+function getThreadWithReplies(threadId) {
+  const thread = getThreadById(threadId);
+  if (!thread) return null;
+  return buildThreadDetailResponse(thread);
+}
+
+function threadListForClient(query) {
+  return buildThreadList(filterThreadsByQuery(loadThreads(), query).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))));
+}
+
+function createReplyObjectFromReq(req, threadId) {
+  return normalizeThreadReply({
+    threadId: String(threadId || ""),
+    authorId: req.userId,
+    content: String(req.body?.content || "").trim().slice(0, 3000),
+    imageUrls: collectThreadImageUrls(req.files),
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+}
+
+function loadThreadAuthor(thread) {
+  return getUserById(loadUsers(), thread.authorId) || { id: thread.authorId, name: "Unknown", email: "" };
+}
+
+function threadPublic(thread) {
+  return { ...thread, author: publicUserSafe(loadThreadAuthor(thread)) };
+}
+
+function replyPublic(reply) {
+  return { ...reply, author: publicUserSafe(getUserById(loadUsers(), reply.authorId) || { id: reply.authorId, name: "Unknown", email: "" }) };
+}
+
+function threadListResponse(query) {
+  return loadThreads()
+    .filter((thread) => filterThreadsByQuery([thread], query).length)
+    .map((thread) => threadPublic(thread));
+}
+
+function threadMatches(thread, query) {
+  return filterThreadsByQuery([thread], query).length > 0;
+}
+
+function loadThreadAndReplies(threadId) {
+  const thread = getThreadById(threadId);
+  if (!thread) return null;
+  return { thread, replies: getRepliesByThreadId(thread.id) };
+}
+
+function threadList(query) {
+  return buildThreadList(filterThreadsByQuery(loadThreads(), query).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))));
+}
+
+function createThreadReplyRecord(req, threadId) {
+  return createReplyObjectFromReq(req, threadId);
+}
+
+function saveReply(reply) {
+  const replies = loadThreadReplies();
+  const index = replies.findIndex((item) => item.id === reply.id);
+  if (index === -1) {
+    replies.push(reply);
+  } else {
+    replies[index] = reply;
+  }
+  saveThreadReplies(replies);
+  return reply;
+}
+
+function threadReplyList(threadId) {
+  return getRepliesByThreadId(threadId).map(replyPublic);
+}
+
+function threadSummary(thread) {
+  return publicThread(thread);
+}
+
+function threadDetail(threadId) {
+  return getThreadDetailWithAuthor(getThreadById(threadId));
+}
+
+function ensureThreadData() {
+  ensureFile(THREADS_FILE, []);
+  ensureFile(THREAD_REPLIES_FILE, []);
+}
+
+function threadRoutesRegistered() {
+  return true;
+}
+
+function normalizePostedTags(body) {
+  return sanitizeTags(body?.tags);
+}
+
+function getThreadOr404(res, threadId) {
+  const thread = getThreadById(threadId);
+  if (!thread) {
+    res.status(404).json({ error: "找不到討論串" });
+    return null;
+  }
+  return thread;
+}
+
+function isThreadOwnerOrError(res, thread, userId) {
+  if (!thread) return false;
+  if (!isThreadOwner(thread, userId)) {
+    res.status(403).json({ error: "只有作者可以執行此操作" });
+    return false;
+  }
+  return true;
+}
+
+function getThreadList(query) {
+  const threads = filterThreadsByQuery(loadThreads(), query).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+  return threads.map(publicThread);
+}
+
+function getThreadDetailObject(threadId) {
+  const thread = getThreadById(threadId);
+  if (!thread) return null;
+  return { ...thread, author: publicUserSafe(getThreadById(loadUsers(), thread.authorId) || { id: thread.authorId, name: "Unknown", email: "" }), replies: threadReplyList(thread.id) };
+}
+
+function threadPayloadFromBody(body) {
+  return {
+    title: String(body?.title || "").trim().slice(0, 80),
+    content: String(body?.content || "").trim().slice(0, 3000),
+    subject: String(body?.subject || "").trim(),
+    tags: sanitizeTags(body?.tags)
+  };
+}
+
+function safeThreadField(value) {
+  return String(value || "").trim();
+}
+
+function getThreadAuthorPublic(thread) {
+  return publicUserSafe(getThreadAuthor(thread));
+}
+
+function threadDataResponse(thread) {
+  return { ...thread, author: getThreadAuthorPublic(thread), replyCount: getRepliesByThreadId(thread.id).length };
+}
+
+function threadDetailDataResponse(thread) {
+  return buildThreadDetailResponse(thread);
+}
+
+function getThreadListPayload(query) {
+  return threadList(query);
+}
+
+function getThreadDetailPayload(threadId) {
+  return threadDetail(threadId);
+}
+
+function getThreadListView(query) {
+  return threadList(query);
+}
+
+function getThreadDetailView(threadId) {
+  return threadDetail(threadId);
+}
+
+function createReplyForThreadId(threadId, req) {
+  const reply = createReplyObjectFromReq(req, threadId);
+  saveReply(reply);
+  return reply;
+}
+
+function threadOwnerCheck(thread, userId) {
+  return thread.authorId === String(userId);
+}
+
+function validateThreadOwner(thread, userId, res) {
+  if (!threadOwnerCheck(thread, userId)) {
+    res.status(403).json({ error: "只有作者可以執行此操作" });
+    return false;
+  }
+  return true;
+}
+
+function threadOwnerOrError(thread, userId, res) {
+  return validateThreadOwner(thread, userId, res);
+}
+
+function getThreadResponse(thread) {
+  return publicThread(thread);
+}
+
+function getThreadDetailResponse(thread) {
+  return publicThreadDetail(thread);
+}
+
+function createThreadResponseBody(thread) {
+  return publicThread(thread);
+}
+
+function createReplyResponseBody(reply) {
+  return buildThreadReplyResponse(reply);
+}
+
+function buildPublicThread(thread) {
+  return publicThread(thread);
+}
+
+function buildPublicReply(reply) {
+  return buildThreadReplyResponse(reply);
+}
+
+function serializeThread(thread) {
+  return publicThread(thread);
+}
+
+function serializeReply(reply) {
+  return buildThreadReplyResponse(reply);
+}
+
+function validateThreadSubmission(req, res) {
+  const title = String(req.body?.title || "").trim();
+  const content = String(req.body?.content || "").trim();
+  if (!title || title.length > 80) {
+    cleanupThreadFiles(req.files);
+    res.status(400).json({ error: "標題長度需為 1~80 字" });
+    return false;
+  }
+  if (!content || content.length > 3000) {
+    cleanupThreadFiles(req.files);
+    res.status(400).json({ error: "內容長度需為 1~3000 字" });
+    return false;
+  }
+  return true;
+}
+
+function validateReplySubmission(req, res) {
+  const content = String(req.body?.content || "").trim();
+  if (!content || content.length > 3000) {
+    cleanupThreadFiles(req.files);
+    res.status(400).json({ error: "回覆內容需為 1~3000 字" });
+    return false;
+  }
+  return true;
+}
+
+function attachThreadRoutes() {
+  app.get("/threads", (req, res) => {
+    try {
+      const threads = filterThreadsByQuery(loadThreads(), req.query).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+      res.json({ threads: threads.map(publicThread) });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: "讀取討論串列表失敗" });
+    }
+  });
+
+  app.post("/threads/create", authMiddleware, (req, res) => {
+    upload.array("images", 4)(req, res, (uploadErr) => {
+      try {
+        if (uploadErr) {
+          const message = threadUploadErrorMessage(uploadErr);
+          return res.status(400).json({ error: message });
+        }
+        if (!validateThreadSubmission(req, res)) return;
+        const thread = normalizeThread({
+          authorId: req.userId,
+          title: String(req.body?.title || "").trim(),
+          content: String(req.body?.content || "").trim(),
+          subject: String(req.body?.subject || "").trim(),
+          tags: sanitizeTags(req.body?.tags),
+          imageUrls: collectThreadImageUrls(req.files),
+          status: "open",
+          acceptedReplyId: null,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        });
+        const threads = loadThreads();
+        threads.push(thread);
+        saveThreads(threads);
+        res.json({ success: true, thread: publicThread(thread) });
+      } catch (err) {
+        cleanupThreadFiles(req.files);
+        console.error(err);
+        res.status(500).json({ error: "建立討論串失敗" });
+      }
+    });
+  });
+
+  app.get("/threads/:threadId", (req, res) => {
+    try {
+      const thread = getThreadById(req.params.threadId);
+      if (!thread) return res.status(404).json({ error: "找不到討論串" });
+      res.json({ thread: publicThreadDetail(thread) });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: "讀取討論串失敗" });
+    }
+  });
+
+  app.post("/threads/:threadId/reply", authMiddleware, (req, res) => {
+    upload.array("images", 4)(req, res, (uploadErr) => {
+      try {
+        if (uploadErr) {
+          const message = threadUploadErrorMessage(uploadErr);
+          return res.status(400).json({ error: message });
+        }
+        if (!validateReplySubmission(req, res)) return;
+        const thread = getThreadById(req.params.threadId);
+        if (!thread) {
+          cleanupThreadFiles(req.files);
+          return res.status(404).json({ error: "找不到討論串" });
+        }
+        const reply = normalizeThreadReply({
+          threadId: thread.id,
+          authorId: req.userId,
+          content: String(req.body?.content || "").trim(),
+          imageUrls: collectThreadImageUrls(req.files),
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        });
+        const replies = loadThreadReplies();
+        replies.push(reply);
+        saveThreadReplies(replies);
+        res.json({ success: true, reply: buildThreadReplyResponse(reply) });
+      } catch (err) {
+        cleanupThreadFiles(req.files);
+        console.error(err);
+        res.status(500).json({ error: "回覆討論串失敗" });
+      }
+    });
+  });
+
+  app.post("/threads/:threadId/accept-reply", authMiddleware, (req, res) => {
+    try {
+      const thread = getThreadById(req.params.threadId);
+      if (!thread) return res.status(404).json({ error: "找不到討論串" });
+      if (!isThreadOwner(thread, req.userId)) return res.status(403).json({ error: "只有討論串作者可以標記最佳解答" });
+      const replyId = String(req.body?.replyId || "").trim();
+      if (!replyId) return res.status(400).json({ error: "請提供 replyId" });
+      const reply = getReplyById(replyId);
+      if (!reply || reply.threadId !== thread.id) return res.status(404).json({ error: "找不到回覆" });
+      thread.acceptedReplyId = reply.id;
+      thread.status = "solved";
+      thread.updatedAt = new Date().toISOString();
+      saveThreads(loadThreads().map((item) => item.id === thread.id ? thread : item));
+      res.json({ success: true, thread: publicThread(thread) });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: "標記最佳解答失敗" });
+    }
+  });
+
+  app.post("/threads/:threadId/close", authMiddleware, (req, res) => {
+    try {
+      const thread = getThreadById(req.params.threadId);
+      if (!thread) return res.status(404).json({ error: "找不到討論串" });
+      if (!isThreadOwner(thread, req.userId)) return res.status(403).json({ error: "只有討論串作者可以關閉或重新開啟" });
+      const requestedStatus = parseThreadStatus(req.body?.status);
+      if (requestedStatus) {
+        thread.status = requestedStatus;
+      } else {
+        thread.status = thread.status === "solved" ? "open" : "solved";
+      }
+      thread.updatedAt = new Date().toISOString();
+      saveThreads(loadThreads().map((item) => item.id === thread.id ? thread : item));
+      res.json({ success: true, thread: publicThread(thread) });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: "關閉或開啟討論串失敗" });
+    }
+  });
+});
+
+attachThreadRoutes();
+
+function publicGroup(group, currentUserId) {
+  const users = loadUsers();
+  const members = group.memberIds.map((id) => getUserById(users, id)).filter(Boolean).map(publicUser);
+  return {
+    id: group.id,
+    name: group.name,
+    description: group.description,
+    ownerId: group.ownerId,
+    memberIds: group.memberIds,
+    members,
+    createdAt: group.createdAt,
+    updatedAt: group.updatedAt,
+    isOwner: group.ownerId === currentUserId
+  };
+}
+
+function isGroupMember(group, userId) {
+  return group.memberIds.includes(userId);
+}
+
+function getGroupById(groupId) {
+  return loadGroups().find((group) => group.id === groupId);
 }
 
 function createId(prefix) {
@@ -1107,6 +2167,191 @@ app.get("/focus-room/active/:friendId", authMiddleware, (req, res) => {
   }
 });
 
+app.post("/groups/create", authMiddleware, (req, res) => {
+  try {
+    const name = String(req.body?.name || "").trim();
+    const description = String(req.body?.description || "").trim();
+    if (!name || name.length > 40) return res.status(400).json({ error: "群組名稱長度需為 1~40 字元" });
+    if (description.length > 200) return res.status(400).json({ error: "群組描述長度不可超過 200 字元" });
+
+    const group = {
+      id: createId("group"),
+      name,
+      description,
+      ownerId: req.userId,
+      memberIds: [req.userId],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    const groups = loadGroups();
+    groups.push(group);
+    saveGroups(groups);
+    res.json({ success: true, group: publicGroup(group, req.userId) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "建立群組失敗" });
+  }
+});
+
+app.get("/groups/list", authMiddleware, (req, res) => {
+  try {
+    const groups = loadGroups().filter((group) => isGroupMember(group, req.userId));
+    res.json({ groups: groups.map((group) => publicGroup(group, req.userId)) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "取得群組列表失敗" });
+  }
+});
+
+app.get("/groups/:groupId", authMiddleware, (req, res) => {
+  try {
+    const group = getGroupById(req.params.groupId);
+    if (!group) return res.status(404).json({ error: "找不到群組" });
+    if (!isGroupMember(group, req.userId)) return res.status(403).json({ error: "你不是這個群組的成員" });
+    res.json({ group: publicGroup(group, req.userId) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "取得群組資料失敗" });
+  }
+});
+
+app.post("/groups/:groupId/invite", authMiddleware, (req, res) => {
+  try {
+    const group = getGroupById(req.params.groupId);
+    if (!group) return res.status(404).json({ error: "找不到群組" });
+    if (!isGroupMember(group, req.userId)) return res.status(403).json({ error: "你不是這個群組的成員" });
+
+    const friendId = String(req.body?.friendId || "").trim();
+    const users = loadUsers();
+    const user = getUserById(users, req.userId);
+    const friend = getUserById(users, friendId);
+    if (!friend) return res.status(404).json({ error: "找不到好友" });
+    if (!areFriends(user, friend.id)) return res.status(403).json({ error: "只能邀請好友加入群組" });
+    if (isGroupMember(group, friend.id)) return res.status(400).json({ error: "這個好友已經在群組中" });
+
+    group.memberIds = uniqueStrings([...group.memberIds, friend.id]);
+    group.updatedAt = new Date().toISOString();
+    saveGroups(loadGroups().map((g) => g.id === group.id ? group : g));
+    res.json({ success: true, group: publicGroup(group, req.userId) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "邀請好友加入群組失敗" });
+  }
+});
+
+app.post("/groups/:groupId/leave", authMiddleware, (req, res) => {
+  try {
+    const group = getGroupById(req.params.groupId);
+    if (!group) return res.status(404).json({ error: "找不到群組" });
+    if (!isGroupMember(group, req.userId)) return res.status(403).json({ error: "你不是這個群組的成員" });
+
+    const groups = loadGroups();
+    if (group.ownerId === req.userId) {
+      const remainingMembers = group.memberIds.filter((id) => id !== req.userId);
+      if (remainingMembers.length > 0) {
+        group.ownerId = remainingMembers[0];
+        group.memberIds = remainingMembers;
+        group.updatedAt = new Date().toISOString();
+        saveGroups(groups.map((g) => g.id === group.id ? group : g));
+      } else {
+        saveGroups(groups.filter((g) => g.id !== group.id));
+      }
+    } else {
+      group.memberIds = group.memberIds.filter((id) => id !== req.userId);
+      group.updatedAt = new Date().toISOString();
+      saveGroups(groups.map((g) => g.id === group.id ? group : g));
+    }
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "離開群組失敗" });
+  }
+});
+
+app.post("/groups/:groupId/update", authMiddleware, (req, res) => {
+  try {
+    const group = getGroupById(req.params.groupId);
+    if (!group) return res.status(404).json({ error: "找不到群組" });
+    if (group.ownerId !== req.userId) return res.status(403).json({ error: "只有群組擁有者可以修改群組" });
+
+    const name = String(req.body?.name || "").trim();
+    const description = String(req.body?.description || "").trim();
+    if (!name || name.length > 40) return res.status(400).json({ error: "群組名稱長度需為 1~40 字元" });
+    if (description.length > 200) return res.status(400).json({ error: "群組描述長度不可超過 200 字元" });
+
+    group.name = name;
+    group.description = description;
+    group.updatedAt = new Date().toISOString();
+    saveGroups(loadGroups().map((g) => g.id === group.id ? group : g));
+    res.json({ success: true, group: publicGroup(group, req.userId) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "更新群組失敗" });
+  }
+});
+
+app.get("/groups/:groupId/messages", authMiddleware, (req, res) => {
+  try {
+    const group = getGroupById(req.params.groupId);
+    if (!group) return res.status(404).json({ error: "找不到群組" });
+    if (!isGroupMember(group, req.userId)) return res.status(403).json({ error: "你不是這個群組的成員" });
+
+    const messages = getGroupMessages(req.params.groupId, 100);
+    res.json({ messages });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "取得群組訊息失敗" });
+  }
+});
+
+app.post("/groups/:groupId/upload-image", authMiddleware, upload.single("image"), (req, res) => {
+  try {
+    const group = getGroupById(req.params.groupId);
+    if (!group) return res.status(404).json({ error: "找不到群組" });
+    if (!isGroupMember(group, req.userId)) return res.status(403).json({ error: "你不是這個群組的成員" });
+
+    if (!req.file) return res.status(400).json({ error: "沒有上傳圖片" });
+
+    const imageUrl = `/uploads/chat/${req.file.filename}`;
+    const message = createGroupMessage({
+      groupId: req.params.groupId,
+      senderId: req.userId,
+      type: "image",
+      content: "",
+      imageUrl
+    });
+
+    if (typeof io !== "undefined") {
+      io.to(message.roomId).emit("message:new", message);
+    }
+
+    res.json({ success: true, message });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "上傳圖片失敗" });
+  }
+});
+
+app.post("/groups/:groupId/remove-member", authMiddleware, (req, res) => {
+  try {
+    const group = getGroupById(req.params.groupId);
+    if (!group) return res.status(404).json({ error: "找不到群組" });
+    if (group.ownerId !== req.userId) return res.status(403).json({ error: "只有群組擁有者可以移除成員" });
+
+    const memberId = String(req.body?.memberId || "").trim();
+    if (memberId === req.userId) return res.status(400).json({ error: "擁有者不能移除自己" });
+    if (!isGroupMember(group, memberId)) return res.status(404).json({ error: "這個使用者不是群組成員" });
+
+    group.memberIds = group.memberIds.filter((id) => id !== memberId);
+    group.updatedAt = new Date().toISOString();
+    saveGroups(loadGroups().map((g) => g.id === group.id ? group : g));
+    res.json({ success: true, group: publicGroup(group, req.userId) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "移除群組成員失敗" });
+  }
+});
+
 app.post("/ai/plan-day", handleMockAI(buildMockPlanDay));
 app.post("/ai/suggest-task", handleMockAI(buildMockSuggestTask));
 app.post("/ai/breakdown-task", handleMockAI(buildMockBreakdownTask));
@@ -1203,11 +2448,40 @@ io.on("connection", (socket) => {
     socket.to(roomId).emit("typing:update", { userId: socket.userId, typing: true });
   });
 
-  socket.on("typing:stop", ({ friendId } = {}) => {
-    const result = requireSocketFriend(socket, String(friendId || ""));
-    if (!result) return;
-    const roomId = getDmRoomId(socket.userId, result.friend.id);
-    socket.to(roomId).emit("typing:update", { userId: socket.userId, typing: false });
+  socket.on("join:group", ({ groupId } = {}) => {
+    const group = getGroupById(String(groupId || ""));
+    if (!group) {
+      socket.emit("chat:error", { error: "找不到群組" });
+      return;
+    }
+    if (!isGroupMember(group, socket.userId)) {
+      socket.emit("chat:error", { error: "你不是這個群組的成員" });
+      return;
+    }
+    const roomId = getGroupRoomId(groupId);
+    socket.join(roomId);
+    socket.emit("messages:history", getGroupMessages(groupId, 100));
+  });
+
+  socket.on("group:message:send", ({ groupId, content, type = "text" } = {}) => {
+    const group = getGroupById(String(groupId || ""));
+    if (!group) {
+      socket.emit("chat:error", { error: "找不到群組" });
+      return;
+    }
+    if (!isGroupMember(group, socket.userId)) {
+      socket.emit("chat:error", { error: "你不是這個群組的成員" });
+      return;
+    }
+    const text = String(content || "").trim().slice(0, 1000);
+    if (!text) return;
+    const message = createGroupMessage({
+      groupId,
+      senderId: socket.userId,
+      type: type === "quick" ? "quick" : "text",
+      content: text
+    });
+    io.to(message.roomId).emit("message:new", message);
   });
 
   socket.on("disconnect", () => {

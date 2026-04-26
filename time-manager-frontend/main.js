@@ -5,7 +5,7 @@ const LS_FOCUS_TASK_KEY = "timeManager_current_focus_task_v2";
 
 const LANGUAGE_ZH = "zh-Hant";
 const LANGUAGE_EN = "en";
-const PAGE_ORDER = ["dashboard", "focus", "tasks", "learning", "friends", "ai", "settings"];
+const PAGE_ORDER = ["dashboard", "focus", "tasks", "learning", "friends", "groups", "threads", "ai", "settings"];
 const QUICK_MESSAGES = [
   "我要開始專注 25 分鐘",
   "一起讀書嗎？",
@@ -93,6 +93,30 @@ const PAGE_DEFAULTS = {
       subtitle: "Use messaging, shared tasks, and synchronized focus sessions to turn personal rhythm into collaboration."
     }
   },
+  groups: {
+    zh: {
+      title: "群組聊天室",
+      eyebrow: "群組",
+      subtitle: "建立和管理群組，進行群組聊天和協作。"
+    },
+    en: {
+      title: "Group Chat Rooms",
+      eyebrow: "Groups",
+      subtitle: "Create and manage groups for chat and collaboration."
+    }
+  },
+  threads: {
+    zh: {
+      title: "公開討論串",
+      eyebrow: "討論區",
+      subtitle: "提出問題、分享知識、獲得解答。"
+    },
+    en: {
+      title: "Public Threads",
+      eyebrow: "Threads",
+      subtitle: "Ask questions, share knowledge, and get answers."
+    }
+  },
   ai: {
     zh: {
       title: "AI 助理",
@@ -149,8 +173,22 @@ let friendsState = {
 let chatSocket = null;
 let activeChatFriendId = null;
 let activeMessages = [];
+let activeGroupId = null;
+let activeGroupMessages = [];
+let isShowingGroups = false; // 新增：追蹤當前顯示的是好友還是群組列表
 let typingTimer = null;
 let onlineUserIds = new Set();
+let threadsState = {
+  threads: [],
+  currentThreadId: null,
+  currentThread: null,
+  filters: {
+    search: "",
+    subject: "",
+    status: "",
+    tag: ""
+  }
+};
 
 const timerState = {
   remainingSeconds: 25 * 60,
@@ -812,9 +850,13 @@ function handleKeyboardShortcuts(event) {
 
 async function apiRequest(path, options = {}) {
   const { headers = {}, ...restOptions } = options;
+  const isFormData = options.body instanceof FormData;
   const res = await fetch(API_BASE + path, {
     ...restOptions,
-    headers: { "Content-Type": "application/json", ...headers }
+    headers: {
+      ...(isFormData ? {} : { "Content-Type": "application/json" }),
+      ...headers
+    }
   });
 
   if (!res.ok) {
@@ -2170,6 +2212,8 @@ function resetFriendsState() {
   disconnectChatSocket();
   activeChatFriendId = null;
   activeMessages = [];
+  activeGroupId = null;
+  activeGroupMessages = [];
   onlineUserIds = new Set();
   friendsState = {
     friends: [],
@@ -2180,6 +2224,12 @@ function resetFriendsState() {
     focusRoom: null,
     focusPollTimer: null,
     focusPollFriendId: null
+  };
+  groupsState = {
+    groups: [],
+    selectedGroupId: null,
+    groupMessages: [],
+    groupMembers: []
   };
 }
 
@@ -2207,6 +2257,7 @@ function connectChatSocket() {
 
   chatSocket.on("connect", () => {
     if (activeChatFriendId) chatSocket.emit("join:dm", { friendId: activeChatFriendId });
+    if (activeGroupId) chatSocket.emit("join:group", { groupId: activeGroupId });
   });
   chatSocket.on("messages:history", (messages) => {
     activeMessages = Array.isArray(messages) ? messages : [];
@@ -2214,9 +2265,18 @@ function connectChatSocket() {
     renderMessages();
   });
   chatSocket.on("message:new", (message) => {
-    if (!isActiveDmMessage(message)) return;
-    addOrUpdateMessage(message);
-    renderMessages();
+    if (isActiveDmMessage(message)) {
+      addOrUpdateMessage(message);
+      renderMessages();
+    } else if (isActiveGroupMessage(message)) {
+      addOrUpdateGroupMessage(message);
+      renderGroupMessages();
+      // 同時更新 groups 頁面的訊息
+      if (groupsState.selectedGroupId === activeGroupId) {
+        addOrUpdateGroupsMessage(message);
+        renderGroupChat();
+      }
+    }
   });
   chatSocket.on("typing:update", ({ userId, typing } = {}) => {
     showTypingIndicator(userId, typing);
@@ -2247,6 +2307,11 @@ function isActiveDmMessage(message) {
   if (!message || !activeChatFriendId) return false;
   return (message.senderId === authState.user?.id && message.receiverId === activeChatFriendId)
     || (message.senderId === activeChatFriendId && message.receiverId === authState.user?.id);
+}
+
+function isActiveGroupMessage(message) {
+  if (!message || !activeGroupId) return false;
+  return message.roomId === `group_${activeGroupId}`;
 }
 
 function addOrUpdateMessage(message) {
@@ -2297,17 +2362,74 @@ function sendChatMessage() {
   const input = $("chatInput");
   const content = input?.value.trim() || "";
   if (!content) return;
-  sendMessage(activeChatFriendId, content, "text");
+  if (activeGroupId) {
+    sendGroupMessage(activeGroupId, content, "text");
+  } else {
+    sendMessage(activeChatFriendId, content, "text");
+  }
   if (input) input.value = "";
   if (chatSocket?.connected && activeChatFriendId) chatSocket.emit("typing:stop", { friendId: activeChatFriendId });
 }
 
 function sendQuickMessage(content) {
-  sendMessage(activeChatFriendId, content, "quick");
+  if (activeGroupId) {
+    sendGroupMessage(activeGroupId, content, "quick");
+  } else {
+    sendMessage(activeChatFriendId, content, "quick");
+  }
 }
 
 async function handleImageUpload(file) {
-  if (!activeChatFriendId) return alert(ui("請先選擇好友。", "Choose a friend first."));
+  if (activeGroupId) {
+    await handleGroupImageUpload(file);
+  } else {
+    if (!activeChatFriendId) return alert(ui("請先選擇好友。", "Choose a friend first."));
+    if (authState.mode !== "user") return alert(ui("請先登入。", "Please sign in first."));
+    if (!file) return;
+    const allowedTypes = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+    if (!allowedTypes.has(file.type)) return alert(ui("只允許 JPG、PNG、WebP 或 GIF 圖片。", "Only JPG, PNG, WebP, or GIF images are allowed."));
+    if (file.size > 10 * 1024 * 1024) return alert(ui("圖片大小不可超過 10MB。", "Image size cannot exceed 10MB."));
+
+    const form = new FormData();
+    form.append("friendId", activeChatFriendId);
+    form.append("image", file);
+    try {
+      const res = await fetch(`${API_BASE}/messages/upload-image`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${authState.token}` },
+        body: form
+      });
+      if (!res.ok) {
+        const errorJson = await res.json().catch(() => ({}));
+        throw new Error(errorJson.error || `HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      if (data.message) {
+        addOrUpdateMessage(data.message);
+        renderMessages();
+      }
+    } catch (err) {
+      alert(ui(`圖片上傳失敗：${err.message}`, `Image upload failed: ${err.message}`));
+    }
+  }
+}
+
+function showTypingIndicator(userId, typing) {
+  const indicator = $("typingIndicator");
+  if (!indicator || userId === authState.user?.id) return;
+  indicator.classList.toggle("hidden", !typing);
+}
+
+function sendGroupChatMessage() {
+  const input = $("groupChatInput");
+  const content = input?.value.trim() || "";
+  if (!content || !groupsState.selectedGroupId) return;
+  sendGroupMessage(groupsState.selectedGroupId, content, "text");
+  if (input) input.value = "";
+}
+
+async function handleGroupImageUpload(file) {
+  if (!groupsState.selectedGroupId) return alert(ui("請先選擇群組。", "Choose a group first."));
   if (authState.mode !== "user") return alert(ui("請先登入。", "Please sign in first."));
   if (!file) return;
   const allowedTypes = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
@@ -2315,10 +2437,9 @@ async function handleImageUpload(file) {
   if (file.size > 10 * 1024 * 1024) return alert(ui("圖片大小不可超過 10MB。", "Image size cannot exceed 10MB."));
 
   const form = new FormData();
-  form.append("friendId", activeChatFriendId);
   form.append("image", file);
   try {
-    const res = await fetch(`${API_BASE}/messages/upload-image`, {
+    const res = await fetch(`${API_BASE}/groups/${encodeURIComponent(groupsState.selectedGroupId)}/upload-image`, {
       method: "POST",
       headers: { Authorization: `Bearer ${authState.token}` },
       body: form
@@ -2329,18 +2450,12 @@ async function handleImageUpload(file) {
     }
     const data = await res.json();
     if (data.message) {
-      addOrUpdateMessage(data.message);
-      renderMessages();
+      groupsState.groupMessages.push(data.message);
+      renderGroupChat();
     }
   } catch (err) {
     alert(ui(`圖片上傳失敗：${err.message}`, `Image upload failed: ${err.message}`));
   }
-}
-
-function showTypingIndicator(userId, typing) {
-  const indicator = $("typingIndicator");
-  if (!indicator || userId === authState.user?.id) return;
-  indicator.classList.toggle("hidden", !typing);
 }
 
 function selectFriend(friendId) {
@@ -2498,10 +2613,153 @@ async function sendMessage(friendId, content, type = "text") {
   }
 }
 
+async function joinGroup(groupId) {
+  if (!groupId) return;
+  if (authState.mode !== "user") {
+    renderGroupMessages();
+    return;
+  }
+  activeGroupId = groupId;
+  activeGroupMessages = [];
+  connectChatSocket();
+  if (chatSocket?.connected) chatSocket.emit("join:group", { groupId });
+  await fetchGroupMessages(groupId);
+  renderGroupMessages();
+}
+
+async function fetchGroupMessages(groupId) {
+  if (!groupId || authState.mode !== "user") {
+    activeGroupMessages = [];
+    return [];
+  }
+  const data = await authenticatedApiRequest(`/groups/${encodeURIComponent(groupId)}/messages`);
+  activeGroupMessages = Array.isArray(data.messages) ? data.messages : [];
+  return activeGroupMessages;
+}
+
+async function sendGroupMessage(groupId, content, type = "text") {
+  if (!groupId) return alert(ui("請先選擇群組。", "Choose a group first."));
+  const message = String(content || "").trim();
+  if (!message) return;
+  try {
+    connectChatSocket();
+    if (chatSocket?.connected) {
+      chatSocket.emit("group:message:send", { groupId, content: message, type });
+      // 樂觀更新
+      const optimisticMessage = {
+        id: Date.now().toString(),
+        senderId: authState.user?.id,
+        senderName: authState.user?.name,
+        content: message,
+        type,
+        createdAt: new Date().toISOString()
+      };
+      groupsState.groupMessages.push(optimisticMessage);
+      renderGroupChat();
+    } else {
+      // 如果 Socket.IO 不可用，可以考慮添加 HTTP API 備用方案
+      alert(ui("即時聊天連線中斷，請重新整理頁面", "Real-time chat connection lost, please refresh the page"));
+    }
+  } catch (err) {
+    alert(ui(`訊息送出失敗：${err.message}`, `Message failed: ${err.message}`));
+  }
+}
+
+async function handleGroupImageUpload(file) {
+  if (!activeGroupId) return alert(ui("請先選擇群組。", "Choose a group first."));
+  if (authState.mode !== "user") return alert(ui("請先登入。", "Please sign in first."));
+  if (!file) return;
+  const allowedTypes = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+  if (!allowedTypes.has(file.type)) return alert(ui("只允許 JPG、PNG、WebP 或 GIF 圖片。", "Only JPG, PNG, WebP, or GIF images are allowed."));
+  if (file.size > 10 * 1024 * 1024) return alert(ui("圖片大小不可超過 10MB。", "Image size cannot exceed 10MB."));
+
+  const form = new FormData();
+  form.append("image", file);
+  try {
+    const res = await fetch(`${API_BASE}/groups/${encodeURIComponent(activeGroupId)}/upload-image`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${authState.token}` },
+      body: form
+    });
+    if (!res.ok) {
+      const errorJson = await res.json().catch(() => ({}));
+      throw new Error(errorJson.error || `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    if (data.message) {
+      addOrUpdateGroupMessage(data.message);
+      renderGroupMessages();
+    }
+  } catch (err) {
+    alert(ui(`圖片上傳失敗：${err.message}`, `Image upload failed: ${err.message}`));
+  }
+}
+
+function addOrUpdateGroupMessage(message) {
+  const normalized = {
+    ...message,
+    content: message?.content || "",
+    imageUrl: message?.imageUrl || ""
+  };
+  const index = activeGroupMessages.findIndex((item) => item.id === normalized.id);
+  if (index >= 0) activeGroupMessages[index] = normalized;
+  else activeGroupMessages.push(normalized);
+  activeGroupMessages.sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+}
+
+function addOrUpdateGroupsMessage(message) {
+  const normalized = {
+    ...message,
+    content: message?.content || "",
+    imageUrl: message?.imageUrl || "",
+    senderName: message?.senderName || ui("未知", "Unknown")
+  };
+  const index = groupsState.groupMessages.findIndex((item) => item.id === normalized.id);
+  if (index >= 0) groupsState.groupMessages[index] = normalized;
+  else groupsState.groupMessages.push(normalized);
+  groupsState.groupMessages.sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+}
+
+function renderGroupMessages() {
+  const list = $("messageList");
+  if (!list) return;
+  if (!activeGroupId) {
+    list.innerHTML = `<p class="empty-state">${authState.mode === "user" ? ui("請先從群組列表選擇聊天對象。", "Choose a group from the list first.") : ui("請先登入才能使用聊天。", "Sign in to use chat.")}</p>`;
+    return;
+  }
+  if (!activeGroupMessages.length) {
+    list.innerHTML = `<p class="empty-state">${ui("還沒有訊息，傳一個訊息開始。", "No messages yet. Send a message to start.")}</p>`;
+    return;
+  }
+  list.innerHTML = activeGroupMessages.map((message) => {
+    const isMe = message.senderId === authState.user?.id;
+    const imageUrl = getMessageImageUrl(message.imageUrl);
+    const imageHtml = message.type === "image" && imageUrl
+      ? `<a href="${escapeHtml(imageUrl)}" target="_blank" rel="noopener"><img class="message-image" src="${escapeHtml(imageUrl)}" alt="${ui("聊天圖片", "Chat image")}" /></a>`
+      : "";
+    const contentHtml = message.content ? `<p>${escapeHtml(message.content)}</p>` : "";
+    return `
+      <div class="message-bubble ${isMe ? "me" : "friend"}">
+        ${imageHtml}
+        ${contentHtml}
+        <span>${message.type === "image" ? ui("圖片", "Image") : message.type === "quick" ? ui("快速訊息", "Quick") : ui("文字", "Text")} · ${formatDateTime(message.createdAt)}</span>
+      </div>
+    `;
+  }).join("");
+  list.scrollTop = list.scrollHeight;
+}
+
 function renderMessages() {
   const list = $("messageList");
-  const friend = selectedFriend();
   if (!list) return;
+
+  // 如果是群組聊天，使用群組訊息渲染
+  if (activeGroupId) {
+    renderGroupMessages();
+    return;
+  }
+
+  const friend = selectedFriend();
   if (!friend) {
     list.innerHTML = `<p class="empty-state">${authState.mode === "user" ? ui("請先從好友列表選擇聊天對象。", "Choose a friend from the list first.") : ui("請先登入才能使用聊天。", "Sign in to use chat.")}</p>`;
     return;
@@ -2736,24 +2994,42 @@ function renderFocusRoom(room) {
 
 function renderFriendsContent() {
   const friendList = $("friendList");
-  if (!friendList) return;
+  const groupList = $("groupList");
+  const listTitle = $("listTitle");
+  const toggleBtn = $("toggleFriendGroupBtn");
+
+  if (!friendList || !groupList || !listTitle || !toggleBtn) return;
 
   const signedIn = authState.mode === "user";
-  const friend = selectedFriend();
-  setText("#friendCountLabel", String(friendsState.friends.length));
-  setText("#chatFriendName", friend ? friendDisplayName(friend) : ui("請選擇好友", "Choose a friend"));
-  setText("#shareFriendName", friend ? ui(`分享任務給 ${friendDisplayName(friend)}`, `Share a task with ${friendDisplayName(friend)}`) : ui("選擇好友分享任務", "Choose a friend to share a task"));
-  setText("#focusRoomFriendName", friend ? ui(`和 ${friendDisplayName(friend)} 一起專注`, `Focus with ${friendDisplayName(friend)}`) : ui("選擇好友一起專注", "Choose a friend to focus together"));
-  setText("#metaFriendName", friend ? ui(`設定 ${friendDisplayName(friend)}`, `Settings for ${friendDisplayName(friend)}`) : ui("選擇好友設定備註", "Choose a friend for notes"));
-  updateChatPresenceLabel();
 
   if (!signedIn) {
     friendList.innerHTML = `<p class="empty-state">${ui("請先登入才能使用 Friends+。", "Sign in to use Friends+.")}</p>`;
+    groupList.innerHTML = "";
     $("friendRequestsList").innerHTML = "";
     $("incomingSharedTasks").innerHTML = "";
     renderMessages();
     renderFocusRoom(null);
     return;
+  }
+
+  // 更新切換按鈕文字
+  toggleBtn.textContent = isShowingGroups ? ui("切換到好友", "Switch to Friends") : ui("切換到群組", "Switch to Groups");
+  listTitle.textContent = isShowingGroups ? ui("我的群組", "My Groups") : ui("我的好友", "My Friends");
+
+  if (isShowingGroups) {
+    // 顯示群組列表
+    friendList.classList.add("hidden");
+    groupList.classList.remove("hidden");
+    renderGroupsList();
+
+    // 隱藏任務共享和一起專注面板，因為群組不支援這些功能
+    setText("#shareFriendName", ui("群組不支援任務共享", "Task sharing not available for groups"));
+    setText("#focusRoomFriendName", ui("群組不支援一起專注", "Focus together not available for groups"));
+  } else {
+    // 顯示好友列表
+    groupList.classList.add("hidden");
+    friendList.classList.remove("hidden");
+    renderFriendsList();
   }
 
   if (!friendsState.friends.length) {
@@ -2849,11 +3125,111 @@ function renderFriendsContent() {
   renderFocusRoom(friendsState.focusRoom);
 }
 
+function renderFriendsList() {
+  const friendList = $("friendList");
+  if (!friendList) return;
+
+  const friend = selectedFriend();
+  setText("#friendCountLabel", String(friendsState.friends.length));
+  setText("#chatFriendName", friend ? friendDisplayName(friend) : ui("請選擇好友", "Choose a friend"));
+  setText("#shareFriendName", friend ? ui(`分享任務給 ${friendDisplayName(friend)}`, `Share a task with ${friendDisplayName(friend)}`) : ui("選擇好友分享任務", "Choose a friend to share a task"));
+  setText("#focusRoomFriendName", friend ? ui(`和 ${friendDisplayName(friend)} 一起專注`, `Focus with ${friendDisplayName(friend)}`) : ui("選擇好友一起專注", "Choose a friend to focus together"));
+  setText("#metaFriendName", friend ? ui(`設定 ${friendDisplayName(friend)}`, `Settings for ${friendDisplayName(friend)}`) : ui("選擇好友設定備註", "Choose a friend for notes"));
+  updateChatPresenceLabel();
+
+  if (!friendsState.friends.length) {
+    friendList.innerHTML = `<p class="empty-state">${ui("尚無好友。用 Email 送出第一個好友邀請。", "No friends yet. Send your first invite by email.")}</p>`;
+  } else {
+    friendList.innerHTML = friendsState.friends.map((item) => `
+      <article class="friend-card ${item.id === friendsState.selectedFriendId ? "active" : ""}" data-friend-id="${escapeHtml(item.id)}">
+        <div>
+          <strong>${escapeHtml(item.originalName || item.name)}</strong>
+          <p>${item.nickname ? `${ui("暱稱", "Nickname")}: ${escapeHtml(item.nickname)}` : ui("尚未設定暱稱", "No nickname set")}</p>
+        </div>
+        <div class="friend-stats">
+          <span>${Number(item.today?.focusMinutes || 0)} ${ui("分", "min")}</span>
+          <span>${Number(item.today?.completedTasks || 0)} ${ui("件完成", "done")}</span>
+        </div>
+        <div class="friend-actions">
+          <button class="small friend-chat" type="button">${ui("聊天", "Chat")}</button>
+          <button class="small secondary friend-share" type="button">${ui("共享任務", "Share task")}</button>
+          <button class="small secondary friend-focus" type="button">${ui("一起專注", "Focus together")}</button>
+          <button class="small secondary friend-meta" type="button">${ui("設定備註", "Notes")}</button>
+        </div>
+      </article>
+    `).join("");
+    friendList.querySelectorAll(".friend-card").forEach((card) => {
+      const friendId = card.dataset.friendId;
+      card.querySelector(".friend-chat").onclick = () => openChat(friendId);
+      card.querySelector(".friend-share").onclick = () => { selectFriend(friendId); renderFriendsContent(); };
+      card.querySelector(".friend-focus").onclick = () => openFocusRoom(friendId);
+      card.querySelector(".friend-meta").onclick = () => { selectFriend(friendId); renderFriendsContent(); $("friendNicknameInput")?.focus(); };
+    });
+  }
+}
+
+function renderGroupsList() {
+  const groupList = $("groupList");
+  if (!groupList) return;
+
+  // 載入群組列表
+  loadGroupsList().then((groups) => {
+    setText("#friendCountLabel", String(groups.length));
+    setText("#chatFriendName", activeGroupId ? ui(`群組聊天中`, "Group Chat") : ui("請選擇群組", "Choose a group"));
+
+    if (!groups.length) {
+      groupList.innerHTML = `<p class="empty-state">${ui("尚無群組。", "No groups yet.")}</p>`;
+    } else {
+      groupList.innerHTML = groups.map((group) => `
+        <article class="friend-card ${group.id === activeGroupId ? "active" : ""}" data-group-id="${escapeHtml(group.id)}">
+          <div>
+            <strong>${escapeHtml(group.name)}</strong>
+            <p>${ui("成員", "Members")}: ${group.members?.length || 0}</p>
+          </div>
+          <div class="friend-actions">
+            <button class="small group-chat" type="button">${ui("聊天", "Chat")}</button>
+          </div>
+        </article>
+      `).join("");
+      groupList.querySelectorAll(".friend-card").forEach((card) => {
+        const groupId = card.dataset.groupId;
+        card.querySelector(".group-chat").onclick = () => openGroupChat(groupId);
+      });
+    }
+  }).catch((err) => {
+    console.error("載入群組列表失敗:", err);
+    groupList.innerHTML = `<p class="empty-state">${ui("載入群組列表失敗。", "Failed to load groups.")}</p>`;
+  });
+}
+
+async function loadGroupsList() {
+  const response = await fetch(`${API_BASE}/groups/list`, {
+    headers: { Authorization: `Bearer ${authState.token}` }
+  });
+  if (!response.ok) throw new Error("載入群組列表失敗");
+  const data = await response.json();
+  return data.groups || [];
+}
+
+function openGroupChat(groupId) {
+  // 清除好友選擇
+  friendsState.selectedFriendId = null;
+  // 設定活躍群組
+  activeGroupId = groupId;
+  // 載入群組訊息
+  fetchGroupMessages(groupId);
+  // 加入群組聊天室
+  joinGroup(groupId);
+  // 重新渲染
+  renderFriendsContent();
+}
+
 async function renderFriends() {
   const friendList = $("friendList");
   if (!friendList) return;
   if (authState.mode !== "user") {
     friendsState = { ...friendsState, friends: [], requests: { incoming: [], outgoing: [] }, messages: [], sharedTasks: [], focusRoom: null };
+    groupsState = { groups: [], selectedGroupId: null, groupMessages: [], groupMembers: [] };
     renderFriendsContent();
     return;
   }
@@ -2861,8 +3237,350 @@ async function renderFriends() {
   try {
     await Promise.all([fetchFriends(), fetchFriendRequests(), fetchIncomingSharedTasks()]);
     renderFriendsContent();
+
+    // 添加切換按鈕事件監聽器
+    const toggleBtn = $("toggleFriendGroupBtn");
+    if (toggleBtn) {
+      toggleBtn.onclick = () => {
+        isShowingGroups = !isShowingGroups;
+        renderFriendsContent();
+      };
+    }
   } catch (err) {
     friendList.innerHTML = `<p class="empty-state">${escapeHtml(ui(`好友資料載入失敗：${err.message}`, `Could not load friends: ${err.message}`))}</p>`;
+  }
+}
+
+let groupsState = {
+  groups: [],
+  selectedGroupId: null,
+  groupMessages: [],
+  groupMembers: []
+};
+
+async function renderGroups() {
+  const groupsList = $("groupsList");
+  if (!groupsList) return;
+  if (authState.mode !== "user") {
+    groupsState = { groups: [], selectedGroupId: null, groupMessages: [], groupMembers: [] };
+    renderGroupsContent();
+    return;
+  }
+  groupsList.innerHTML = `<p class="empty-state">${ui("載入群組中...", "Loading groups...")}</p>`;
+  try {
+    await Promise.all([fetchGroups(), fetchFriends()]);
+    renderGroupsContent();
+  } catch (err) {
+    groupsList.innerHTML = `<p class="empty-state">${escapeHtml(ui(`群組資料載入失敗：${err.message}`, `Could not load groups: ${err.message}`))}</p>`;
+  }
+}
+
+function renderGroupsContent() {
+  const groupsList = $("groupsList");
+  const signedIn = authState.mode === "user";
+
+  if (!signedIn) {
+    groupsList.innerHTML = `<p class="empty-state">${ui("請先登入才能使用群組。", "Sign in to use groups.")}</p>`;
+    renderGroupChat();
+    renderGroupMembers();
+    renderGroupSettings();
+    return;
+  }
+
+  if (!groupsState.groups.length) {
+    groupsList.innerHTML = `<p class="empty-state">${ui("尚無群組。用右上角按鈕建立第一個群組。", "No groups yet. Create your first group with the button above.")}</p>`;
+  } else {
+    groupsList.innerHTML = groupsState.groups.map((group) => `
+      <article class="group-card ${group.id === groupsState.selectedGroupId ? "active" : ""}" data-group-id="${escapeHtml(group.id)}">
+        <div>
+          <strong>${escapeHtml(group.name)}</strong>
+          <p>${escapeHtml(group.description || ui("無描述", "No description"))}</p>
+          <span class="group-member-count">${ui("成員", "Members")}: ${group.members?.length || 0}</span>
+        </div>
+        <button class="small group-open-chat" type="button">${ui("開啟聊天", "Open Chat")}</button>
+      </article>
+    `).join("");
+    groupsList.querySelectorAll(".group-card").forEach((card) => {
+      const groupId = card.dataset.groupId;
+      card.querySelector(".group-open-chat").onclick = () => openGroup(groupId);
+    });
+  }
+
+  renderGroupChat();
+  renderGroupMembers();
+  renderGroupSettings();
+}
+
+async function fetchGroups() {
+  const response = await fetch(`${API_BASE}/groups/list`, {
+    headers: { Authorization: `Bearer ${authState.token}` }
+  });
+  if (!response.ok) throw new Error("載入群組列表失敗");
+  const data = await response.json();
+  groupsState.groups = data.groups || [];
+  return groupsState.groups;
+}
+
+async function createGroup() {
+  const name = $("groupNameInput").value.trim();
+  const description = $("groupDescriptionInput").value.trim();
+  if (!name) return alert(ui("請輸入群組名稱。", "Please enter a group name."));
+
+  try {
+    const response = await fetch(`${API_BASE}/groups/create`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${authState.token}`
+      },
+      body: JSON.stringify({ name, description })
+    });
+    if (!response.ok) throw new Error("建立群組失敗");
+    const data = await response.json();
+    showToast(ui("群組建立成功", "Group created successfully"));
+    await fetchGroups();
+    renderGroupsContent();
+    toggleCreateGroupForm(false);
+  } catch (err) {
+    alert(ui(`建立群組失敗：${err.message}`, `Create group failed: ${err.message}`));
+  }
+}
+
+function openGroup(groupId) {
+  groupsState.selectedGroupId = groupId;
+  fetchGroupDetail(groupId);
+  renderGroupsContent();
+}
+
+async function fetchGroupDetail(groupId) {
+  if (!groupId || authState.mode !== "user") return;
+  try {
+    const response = await fetch(`${API_BASE}/groups/${encodeURIComponent(groupId)}`, {
+      headers: { Authorization: `Bearer ${authState.token}` }
+    });
+    if (!response.ok) throw new Error("載入群組詳情失敗");
+    const data = await response.json();
+    groupsState.groupMembers = data.members || [];
+    await fetchGroupMessages(groupId);
+  } catch (err) {
+    console.error("載入群組詳情失敗:", err);
+  }
+}
+
+async function fetchGroupMessages(groupId) {
+  if (!groupId || authState.mode !== "user") {
+    groupsState.groupMessages = [];
+    return [];
+  }
+  try {
+    const response = await fetch(`${API_BASE}/groups/${encodeURIComponent(groupId)}/messages`, {
+      headers: { Authorization: `Bearer ${authState.token}` }
+    });
+    if (!response.ok) throw new Error("載入群組訊息失敗");
+    const data = await response.json();
+    groupsState.groupMessages = Array.isArray(data.messages) ? data.messages : [];
+  } catch (err) {
+    console.error("載入群組訊息失敗:", err);
+    groupsState.groupMessages = [];
+  }
+  return groupsState.groupMessages;
+}
+
+async function inviteFriendToGroup(groupId, friendId) {
+  if (!groupId || !friendId) return alert(ui("請選擇群組和好友。", "Please select a group and friend."));
+  try {
+    const response = await fetch(`${API_BASE}/groups/${encodeURIComponent(groupId)}/invite`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${authState.token}`
+      },
+      body: JSON.stringify({ userId: friendId })
+    });
+    if (!response.ok) throw new Error("邀請好友失敗");
+    showToast(ui("好友邀請已送出", "Friend invitation sent"));
+    await fetchGroupDetail(groupId);
+    renderGroupMembers();
+  } catch (err) {
+    alert(ui(`邀請好友失敗：${err.message}`, `Invite friend failed: ${err.message}`));
+  }
+}
+
+async function leaveGroup(groupId) {
+  if (!groupId) return alert(ui("請選擇群組。", "Please select a group."));
+  if (!confirm(ui("確定要離開這個群組嗎？", "Are you sure you want to leave this group?"))) return;
+  try {
+    const response = await fetch(`${API_BASE}/groups/${encodeURIComponent(groupId)}/leave`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${authState.token}` }
+    });
+    if (!response.ok) throw new Error("離開群組失敗");
+    showToast(ui("已離開群組", "Left the group"));
+    groupsState.selectedGroupId = null;
+    await fetchGroups();
+    renderGroupsContent();
+  } catch (err) {
+    alert(ui(`離開群組失敗：${err.message}`, `Leave group failed: ${err.message}`));
+  }
+}
+
+async function updateGroup(groupId) {
+  const name = $("editGroupNameInput").value.trim();
+  const description = $("editGroupDescriptionInput").value.trim();
+  if (!name) return alert(ui("請輸入群組名稱。", "Please enter a group name."));
+
+  try {
+    const response = await fetch(`${API_BASE}/groups/${encodeURIComponent(groupId)}/update`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${authState.token}`
+      },
+      body: JSON.stringify({ name, description })
+    });
+    if (!response.ok) throw new Error("更新群組失敗");
+    showToast(ui("群組更新成功", "Group updated successfully"));
+    await fetchGroups();
+    renderGroupsContent();
+  } catch (err) {
+    alert(ui(`更新群組失敗：${err.message}`, `Update group failed: ${err.message}`));
+  }
+}
+
+async function removeGroupMember(groupId, memberId) {
+  if (!groupId || !memberId) return alert(ui("請選擇群組和成員。", "Please select a group and member."));
+  if (!confirm(ui("確定要移除這個成員嗎？", "Are you sure you want to remove this member?"))) return;
+  try {
+    const response = await fetch(`${API_BASE}/groups/${encodeURIComponent(groupId)}/remove-member`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${authState.token}`
+      },
+      body: JSON.stringify({ userId: memberId })
+    });
+    if (!response.ok) throw new Error("移除成員失敗");
+    showToast(ui("成員已移除", "Member removed"));
+    await fetchGroupDetail(groupId);
+    renderGroupMembers();
+  } catch (err) {
+    alert(ui(`移除成員失敗：${err.message}`, `Remove member failed: ${err.message}`));
+  }
+}
+
+function renderGroupMembers(group) {
+  const list = $("groupMembersList");
+  const title = $("groupMembersTitle");
+  const inviteSelect = $("inviteFriendSelect");
+  if (!list || !title || !inviteSelect) return;
+
+  if (!groupsState.selectedGroupId) {
+    title.textContent = ui("請選擇群組", "Choose a group");
+    list.innerHTML = `<p class="empty-state">${ui("請先選擇群組查看成員。", "Select a group to view members.")}</p>`;
+    inviteSelect.innerHTML = `<option value="">${ui("請先選擇群組", "Choose a group first")}</option>`;
+    return;
+  }
+
+  title.textContent = ui("群組成員", "Group Members");
+  if (!groupsState.groupMembers.length) {
+    list.innerHTML = `<p class="empty-state">${ui("載入中...", "Loading...")}</p>`;
+    inviteSelect.innerHTML = `<option value="">${ui("載入中...", "Loading...")}</option>`;
+    return;
+  }
+
+  const currentUserId = authState.user?.id;
+  const isOwner = groupsState.groupMembers.find(m => m.id === currentUserId)?.isOwner;
+
+  list.innerHTML = groupsState.groupMembers.map((member) => `
+    <div class="group-member-item">
+      <div>
+        <strong>${escapeHtml(member.name)}</strong>
+        ${member.isOwner ? `<span class="owner-badge">${ui("群主", "Owner")}</span>` : ""}
+      </div>
+      ${isOwner && member.id !== currentUserId ? `<button class="small danger remove-member-btn" data-member-id="${member.id}" type="button">${ui("移除", "Remove")}</button>` : ""}
+    </div>
+  `).join("");
+
+  list.querySelectorAll(".remove-member-btn").forEach((btn) => {
+    btn.onclick = () => removeGroupMember(groupsState.selectedGroupId, btn.dataset.memberId);
+  });
+
+  // 更新邀請好友下拉選單
+  const memberIds = new Set(groupsState.groupMembers.map(m => m.id));
+  const availableFriends = friendsState.friends.filter(f => !memberIds.has(f.id));
+  inviteSelect.innerHTML = `<option value="">${ui("選擇好友...", "Choose a friend...")}</option>` +
+    availableFriends.map(f => `<option value="${escapeHtml(f.id)}">${escapeHtml(f.originalName || f.name)}</option>`).join("");
+}
+
+function renderGroupChat() {
+  const list = $("groupMessageList");
+  const title = $("groupChatTitle");
+  if (!list || !title) return;
+
+  if (!groupsState.selectedGroupId) {
+    title.textContent = ui("請選擇群組", "Choose a group");
+    list.innerHTML = `<p class="empty-state">${ui("請先選擇群組開始聊天。", "Select a group to start chatting.")}</p>`;
+    return;
+  }
+
+  title.textContent = ui("群組聊天", "Group Chat");
+  if (!groupsState.groupMessages.length) {
+    list.innerHTML = `<p class="empty-state">${ui("還沒有訊息，傳一個訊息開始。", "No messages yet. Send a message to start.")}</p>`;
+    return;
+  }
+
+  list.innerHTML = groupsState.groupMessages.map((message) => {
+    const isMe = message.senderId === authState.user?.id;
+    const imageUrl = getMessageImageUrl(message.imageUrl);
+    const imageHtml = message.type === "image" && imageUrl
+      ? `<a href="${escapeHtml(imageUrl)}" target="_blank" rel="noopener"><img class="message-image" src="${escapeHtml(imageUrl)}" alt="${ui("聊天圖片", "Chat image")}" /></a>`
+      : "";
+    const contentHtml = message.content ? `<p>${escapeHtml(message.content)}</p>` : "";
+    return `
+      <div class="group-message-bubble ${isMe ? "me" : "other"}">
+        <div class="message-sender">${escapeHtml(message.senderName || ui("未知", "Unknown"))}</div>
+        ${imageHtml}
+        ${contentHtml}
+        <span>${message.type === "image" ? ui("圖片", "Image") : ui("文字", "Text")} · ${formatDateTime(message.createdAt)}</span>
+      </div>
+    `;
+  }).join("");
+  list.scrollTop = list.scrollHeight;
+}
+
+function renderGroupSettings() {
+  const form = $("groupSettingsForm");
+  const title = $("groupSettingsTitle");
+  if (!form || !title) return;
+
+  if (!groupsState.selectedGroupId) {
+    title.textContent = ui("請選擇群組", "Choose a group");
+    form.classList.add("hidden");
+    return;
+  }
+
+  const group = groupsState.groups.find(g => g.id === groupsState.selectedGroupId);
+  if (!group) {
+    title.textContent = ui("群組不存在", "Group not found");
+    form.classList.add("hidden");
+    return;
+  }
+
+  title.textContent = ui("群組設定", "Group Settings");
+  form.classList.remove("hidden");
+  $("editGroupNameInput").value = group.name || "";
+  $("editGroupDescriptionInput").value = group.description || "";
+}
+
+function toggleCreateGroupForm(show) {
+  const listPanel = document.querySelector(".group-list-panel");
+  const createPanel = document.querySelector(".group-create-panel");
+  if (show) {
+    listPanel.classList.add("hidden");
+    createPanel.classList.remove("hidden");
+  } else {
+    createPanel.classList.add("hidden");
+    listPanel.classList.remove("hidden");
   }
 }
 
@@ -3029,6 +3747,16 @@ function renderCurrentPage() {
     return;
   }
 
+  if (currentPage === "groups") {
+    renderGroups();
+    return;
+  }
+
+  if (currentPage === "threads") {
+    renderThreads();
+    return;
+  }
+
   if (currentPage === "ai") {
     if (lastAIResult) renderAIResult(lastAIResult);
     renderAILogs();
@@ -3094,11 +3822,72 @@ function bindEvents() {
     handleImageUpload(event.target.files?.[0]);
     event.target.value = "";
   };
-  $("shareTaskBtn").onclick = () => shareTaskWithFriend(friendsState.selectedFriendId, $("shareTaskSelect")?.value || "");
-  $("createFocusRoomBtn").onclick = () => createFocusRoom(friendsState.selectedFriendId);
+  $("shareTaskBtn").onclick = () => {
+    if (isShowingGroups || !friendsState.selectedFriendId) return;
+    shareTaskWithFriend(friendsState.selectedFriendId, $("shareTaskSelect")?.value || "");
+  };
+  $("createFocusRoomBtn").onclick = () => {
+    if (isShowingGroups || !friendsState.selectedFriendId) return;
+    createFocusRoom(friendsState.selectedFriendId);
+  };
   $("friendMetaForm").onsubmit = (event) => {
     event.preventDefault();
     updateFriendMeta();
+  };
+
+  // 群組相關事件
+  $("createGroupBtn").onclick = () => toggleCreateGroupForm(true);
+  $("cancelCreateGroupBtn").onclick = () => toggleCreateGroupForm(false);
+  $("createGroupForm").onsubmit = (event) => {
+    event.preventDefault();
+    createGroup();
+  };
+  $("groupChatForm").onsubmit = (event) => {
+    event.preventDefault();
+    sendGroupChatMessage();
+  };
+  $("groupOpenImagePickerBtn").onclick = () => $("groupChatImageInput").click();
+  $("groupChatImageInput").onchange = (event) => {
+    handleGroupImageUpload(event.target.files?.[0]);
+    event.target.value = "";
+  };
+  $("inviteFriendBtn").onclick = () => {
+    const friendId = $("inviteFriendSelect").value;
+    if (friendId && groupsState.selectedGroupId) {
+      inviteFriendToGroup(groupsState.selectedGroupId, friendId);
+    }
+  };
+  $("groupSettingsForm").onsubmit = (event) => {
+    event.preventDefault();
+    updateGroup(groupsState.selectedGroupId);
+  };
+  $("leaveGroupBtn").onclick = () => leaveGroup(groupsState.selectedGroupId);
+
+  // Threads 相關事件
+  $("threadForm").onsubmit = (event) => {
+    event.preventDefault();
+    createThread();
+  };
+  $("threadSearch").oninput = () => {
+    threadsState.filters.search = $("threadSearch").value;
+    renderThreadList();
+  };
+  $("threadSubjectFilter").onchange = () => {
+    threadsState.filters.subject = $("threadSubjectFilter").value;
+    renderThreadList();
+  };
+  $("threadStatusFilter").onchange = () => {
+    threadsState.filters.status = $("threadStatusFilter").value;
+    renderThreadList();
+  };
+  $("threadTagFilter").onchange = () => {
+    threadsState.filters.tag = $("threadTagFilter").value;
+    renderThreadList();
+  };
+  $("closeThreadBtn").onclick = () => closeThread(threadsState.currentThreadId);
+  $("replyForm").onsubmit = (event) => {
+    event.preventDefault();
+    createThreadReply(threadsState.currentThreadId);
   };
 
   document.querySelectorAll(".ai-action").forEach((button) => {
@@ -3141,6 +3930,272 @@ async function init() {
   initChatSocket();
   applySettingsToTimer();
   setPage("dashboard");
+}
+
+// Threads 相關函數
+async function renderThreads() {
+  await fetchThreads();
+  renderThreadList();
+  if (threadsState.currentThreadId) {
+    await fetchThreadDetail(threadsState.currentThreadId);
+    renderThreadDetail();
+  }
+}
+
+async function fetchThreads() {
+  try {
+    const response = await authenticatedApiRequest("/threads");
+    threadsState.threads = response.threads || [];
+    updateThreadFilters();
+  } catch (error) {
+    console.error("Failed to fetch threads:", error);
+    showToast("載入討論串失敗");
+  }
+}
+
+async function createThread() {
+  const formData = new FormData();
+  formData.append("title", $("threadTitle").value.trim());
+  formData.append("content", $("threadContent").value.trim());
+  formData.append("subject", $("threadSubject").value.trim());
+  const tags = $("threadTags").value.split(',').map(t => t.trim()).filter(t => t);
+  formData.append("tags", JSON.stringify(tags));
+
+  const images = $("threadImages").files;
+  for (let i = 0; i < images.length; i++) {
+    formData.append("images", images[i]);
+  }
+
+  if (!formData.get("title") || !formData.get("content")) {
+    showToast("請填寫標題和內容");
+    return;
+  }
+
+  try {
+    const response = await authenticatedApiRequest("/threads/create", {
+      method: "POST",
+      body: formData
+    });
+    showToast("討論串發問成功");
+    clearThreadForm();
+    await fetchThreads();
+    renderThreadList();
+  } catch (error) {
+    console.error("Failed to create thread:", error);
+    showToast("發問失敗");
+  }
+}
+
+async function openThread(threadId) {
+  threadsState.currentThreadId = threadId;
+  await fetchThreadDetail(threadId);
+  renderThreadDetail();
+}
+
+async function fetchThreadDetail(threadId) {
+  try {
+    const response = await authenticatedApiRequest(`/threads/${threadId}`);
+    threadsState.currentThread = response.thread;
+  } catch (error) {
+    console.error("Failed to fetch thread detail:", error);
+    showToast("載入討論串詳細內容失敗");
+  }
+}
+
+async function createThreadReply(threadId) {
+  const formData = new FormData();
+  formData.append("content", $("replyContent").value.trim());
+
+  const images = $("replyImages").files;
+  for (let i = 0; i < images.length; i++) {
+    formData.append("images", images[i]);
+  }
+
+  if (!formData.get("content")) {
+    showToast("請填寫回覆內容");
+    return;
+  }
+
+  try {
+    const response = await authenticatedApiRequest(`/threads/${threadId}/reply`, {
+      method: "POST",
+      body: formData
+    });
+    showToast("回覆成功");
+    clearReplyForm();
+    await fetchThreadDetail(threadId);
+    renderThreadDetail();
+  } catch (error) {
+    console.error("Failed to create reply:", error);
+    showToast("回覆失敗");
+  }
+}
+
+async function acceptThreadReply(threadId, replyId) {
+  try {
+    await authenticatedApiRequest(`/threads/${threadId}/accept-reply`, {
+      method: "POST",
+      body: JSON.stringify({ replyId })
+    });
+    showToast("已標記最佳解答");
+    await fetchThreadDetail(threadId);
+    renderThreadDetail();
+  } catch (error) {
+    console.error("Failed to accept reply:", error);
+    showToast("標記最佳解答失敗");
+  }
+}
+
+async function closeThread(threadId) {
+  try {
+    await authenticatedApiRequest(`/threads/${threadId}/close`, {
+      method: "POST"
+    });
+    showToast("討論串已結案");
+    await fetchThreads();
+    renderThreadList();
+    await fetchThreadDetail(threadId);
+    renderThreadDetail();
+  } catch (error) {
+    console.error("Failed to close thread:", error);
+    showToast("結案失敗");
+  }
+}
+
+function renderThreadList() {
+  const list = $("threadList");
+  const filteredThreads = threadsState.threads.filter(thread => {
+    const matchesSearch = !threadsState.filters.search ||
+      thread.title.toLowerCase().includes(threadsState.filters.search.toLowerCase()) ||
+      thread.content.toLowerCase().includes(threadsState.filters.search.toLowerCase());
+    const matchesSubject = !threadsState.filters.subject || thread.subject === threadsState.filters.subject;
+    const matchesStatus = !threadsState.filters.status || thread.status === threadsState.filters.status;
+    const matchesTag = !threadsState.filters.tag ||
+      thread.tags.some(tag => tag === threadsState.filters.tag);
+    return matchesSearch && matchesSubject && matchesStatus && matchesTag;
+  });
+
+  list.innerHTML = filteredThreads.map(thread => `
+    <li class="thread-card ${threadsState.currentThreadId === thread.id ? 'active' : ''}" onclick="openThread('${thread.id}')">
+      <div class="thread-header">
+        <h4>${escapeHtml(thread.title)}</h4>
+        <span class="thread-status status-${thread.status}">${thread.status === 'open' ? '開放中' : '已結案'}</span>
+      </div>
+      <div class="thread-meta">
+        <span class="thread-subject">${escapeHtml(thread.subject || '未分類')}</span>
+        <span class="thread-author">${escapeHtml(thread.author?.name || '匿名')}</span>
+        <span class="thread-replies">${thread.replies?.length || 0} 回覆</span>
+        <span class="thread-date">${new Date(thread.createdAt).toLocaleDateString()}</span>
+      </div>
+      <div class="thread-tags">
+        ${thread.tags.map(tag => `<span class="tag">${escapeHtml(tag)}</span>`).join('')}
+      </div>
+    </li>
+  `).join('');
+}
+
+function renderThreadDetail() {
+  const detail = $("threadDetail");
+  const replies = $("threadReplies");
+  const actions = $("threadActions");
+  const title = $("threadDetailTitle");
+
+  if (!threadsState.currentThread) {
+    detail.innerHTML = '<p>請從左側選擇討論串查看詳細內容。</p>';
+    replies.classList.add('hidden');
+    actions.classList.add('hidden');
+    title.textContent = '請選擇討論串';
+    return;
+  }
+
+  const thread = threadsState.currentThread;
+  title.textContent = escapeHtml(thread.title);
+  actions.classList.remove('hidden');
+  if ($("closeThreadBtn")) {
+    $("closeThreadBtn").style.display = thread.status === 'open' && thread.author?.id === authState.user?.id ? 'inline-block' : 'none';
+  }
+
+  detail.innerHTML = `
+    <div class="thread-content">
+      <div class="thread-info">
+        <span class="thread-author">${escapeHtml(thread.author?.name || '匿名')}</span>
+        <span class="thread-date">${new Date(thread.createdAt).toLocaleDateString()}</span>
+        <span class="thread-status status-${thread.status}">${thread.status === 'open' ? '開放中' : '已結案'}</span>
+      </div>
+      <div class="thread-subject-tags">
+        <span class="thread-subject">${escapeHtml(thread.subject || '未分類')}</span>
+        <div class="thread-tags">
+          ${thread.tags.map(tag => `<span class="tag">${escapeHtml(tag)}</span>`).join('')}
+        </div>
+      </div>
+      <div class="thread-text">${escapeHtml(thread.content).replace(/\n/g, '<br>')}</div>
+      ${thread.images && thread.images.length > 0 ? `
+        <div class="thread-image-grid">
+          ${thread.images.map(image => `
+            <img src="${API_BASE}${image.url}" alt="討論串圖片" onclick="window.open('${API_BASE}${image.url}', '_blank')" />
+          `).join('')}
+        </div>
+      ` : ''}
+    </div>
+  `;
+
+  replies.classList.remove('hidden');
+  const replyList = $("replyList");
+  replyList.innerHTML = thread.replies.map(reply => `
+    <li class="reply-card ${reply.accepted ? 'accepted-reply' : ''}">
+      <div class="reply-header">
+        <span class="reply-author">${escapeHtml(reply.author?.name || '匿名')}</span>
+        <span class="reply-date">${new Date(reply.createdAt).toLocaleDateString()}</span>
+        ${reply.accepted ? '<span class="accepted-badge">最佳解答</span>' : ''}
+        ${thread.author?.id === authState.user?.id && thread.status === 'open' && !reply.accepted ? `
+          <button class="accept-reply-btn small" onclick="acceptThreadReply('${thread.id}', '${reply.id}')">標記為最佳解答</button>
+        ` : ''}
+      </div>
+      <div class="reply-content">${escapeHtml(reply.content).replace(/\n/g, '<br>')}</div>
+      ${reply.images && reply.images.length > 0 ? `
+        <div class="reply-image-grid">
+          ${reply.images.map(image => `
+            <img src="${API_BASE}${image.url}" alt="回覆圖片" onclick="window.open('${API_BASE}${image.url}', '_blank')" />
+          `).join('')}
+        </div>
+      ` : ''}
+    </li>
+  `).join('');
+}
+
+function updateThreadFilters() {
+  const subjectFilter = $("threadSubjectFilter");
+  const tagFilter = $("threadTagFilter");
+
+  if (!subjectFilter || !tagFilter) return;
+
+  const subjects = [...new Set(threadsState.threads.map(t => t.subject).filter(Boolean))];
+  subjectFilter.innerHTML = '<option value="">所有科目</option>' +
+    subjects.map(subject => `<option value="${escapeHtml(subject)}">${escapeHtml(subject)}</option>`).join('');
+
+  const allTags = threadsState.threads.flatMap(t => t.tags || []);
+  const tags = [...new Set(allTags)];
+  tagFilter.innerHTML = '<option value="">所有標籤</option>' +
+    tags.map(tag => `<option value="${escapeHtml(tag)}">${escapeHtml(tag)}</option>`).join('');
+}
+
+function clearThreadForm() {
+  $("threadTitle").value = '';
+  $("threadContent").value = '';
+  $("threadSubject").value = '';
+  $("threadTags").value = '';
+  if ($("threadImages")) $("threadImages").value = '';
+}
+
+function clearReplyForm() {
+  $("replyContent").value = '';
+  if ($("replyImages")) $("replyImages").value = '';
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
 }
 
 window.addEventListener("load", init);

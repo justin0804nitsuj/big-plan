@@ -23,6 +23,8 @@
         <button class="nav-link" data-page="tasks" type="button">任務</button>
         <button class="nav-link" data-page="learning" type="button">學習</button>
         <button class="nav-link" data-page="friends" type="button">好友</button>
+        <button class="nav-link" data-page="groups" type="button">群組</button>
+        <button class="nav-link" data-page="threads" type="button">討論區</button>
         <button class="nav-link" data-page="ai" type="button">AI 助理</button>
         <button class="nav-link" data-page="settings" type="button">設定</button>
       </nav>
@@ -329,12 +331,16 @@
           <section class="panel friend-list-panel">
             <div class="section-head">
               <div>
-                <p class="eyebrow">好友列表</p>
-                <h3>我的好友</h3>
+                <p class="eyebrow">好友與群組列表</p>
+                <h3 id="listTitle">我的好友</h3>
               </div>
-              <span id="friendCountLabel" class="status-pill">0</span>
+              <div class="button-row">
+                <button id="toggleFriendGroupBtn" class="small secondary" type="button">切換到群組</button>
+                <span id="friendCountLabel" class="status-pill">0</span>
+              </div>
             </div>
             <div id="friendList" class="friend-list"></div>
+            <div id="groupList" class="friend-list hidden"></div>
           </section>
 
           <section class="panel friend-request-panel">
@@ -358,7 +364,7 @@
             <div class="section-head">
               <div>
                 <p class="eyebrow">Chat</p>
-                <h3 id="chatFriendName">請選擇好友</h3>
+                <h3 id="chatFriendName">請選擇好友或群組</h3>
               </div>
               <span id="chatPresenceLabel" class="status-pill">離線</span>
             </div>
@@ -421,6 +427,89 @@
               <label>自訂暱稱 <input id="friendNicknameInput" type="text" /></label>
               <label class="wide">備註 <textarea id="friendNoteInput" rows="3"></textarea></label>
               <button class="wide" type="submit">儲存好友設定</button>
+            </form>
+          </section>
+        </div>
+      </section>
+
+      <section id="page-groups" class="page" data-page-title="群組聊天室" data-page-eyebrow="群組" data-page-subtitle="建立和管理群組，進行群組聊天和協作。">
+        <div class="groups-layout">
+          <section class="panel group-list-panel">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">我的群組</p>
+                <h3>群組列表</h3>
+              </div>
+              <button id="createGroupBtn" class="secondary small" type="button">建立群組</button>
+            </div>
+            <div id="groupsList" class="group-list"></div>
+          </section>
+
+          <section class="panel group-create-panel hidden">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">建立群組</p>
+                <h3>新增群組</h3>
+              </div>
+              <button id="cancelCreateGroupBtn" class="secondary small" type="button">取消</button>
+            </div>
+            <form id="createGroupForm" class="form-grid">
+              <label>群組名稱 <input type="text" id="groupNameInput" required /></label>
+              <label>描述 <textarea id="groupDescriptionInput" rows="3" placeholder="群組的簡短描述"></textarea></label>
+              <button type="submit">建立群組</button>
+            </form>
+          </section>
+
+          <section class="panel group-chat-panel">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">群組聊天</p>
+                <h3 id="groupChatTitle">請選擇群組</h3>
+              </div>
+            </div>
+            <div id="groupMessageList" class="message-list"></div>
+            <div id="groupTypingIndicator" class="typing-indicator muted hidden">有人正在輸入...</div>
+            <form id="groupChatForm" class="chat-form">
+              <input id="groupChatInput" type="text" placeholder="輸入訊息..." />
+              <input id="groupChatImageInput" type="file" accept="image/jpeg,image/png,image/webp,image/gif" hidden />
+              <button id="groupOpenImagePickerBtn" class="secondary" type="button">圖片</button>
+              <button type="submit">送出</button>
+            </form>
+          </section>
+
+          <section class="panel group-members-panel">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">成員管理</p>
+                <h3 id="groupMembersTitle">請選擇群組</h3>
+              </div>
+            </div>
+            <div id="groupMembersList" class="group-member-list"></div>
+            <div class="group-invite-section">
+              <label>
+                邀請好友加入
+                <select id="inviteFriendSelect">
+                  <option value="">選擇好友...</option>
+                </select>
+              </label>
+              <button id="inviteFriendBtn" type="button">邀請</button>
+            </div>
+          </section>
+
+          <section class="panel group-settings-panel">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">群組設定</p>
+                <h3 id="groupSettingsTitle">請選擇群組</h3>
+              </div>
+            </div>
+            <form id="groupSettingsForm" class="form-grid hidden">
+              <label>群組名稱 <input type="text" id="editGroupNameInput" required /></label>
+              <label>描述 <textarea id="editGroupDescriptionInput" rows="3"></textarea></label>
+              <div class="button-row">
+                <button id="updateGroupBtn" type="submit">更新設定</button>
+                <button id="leaveGroupBtn" class="danger" type="button">離開群組</button>
+              </div>
             </form>
           </section>
         </div>
@@ -541,6 +630,73 @@
                 <span id="shortcutSettingsLabel">直接切換到設定</span>
                 <strong><kbd>Esc</kbd></strong>
               </div>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section id="page-threads" class="page" data-page-title="公開討論串" data-page-eyebrow="討論區" data-page-subtitle="提出問題、分享知識、獲得解答。">
+        <div class="threads-layout">
+          <section class="panel thread-form-panel">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">發問</p>
+                <h3>提出新問題</h3>
+              </div>
+            </div>
+            <form id="threadForm" class="form-grid">
+              <label>標題 <input type="text" id="threadTitle" required /></label>
+              <label>內容 <textarea id="threadContent" rows="4" required></textarea></label>
+              <label>科目 <input type="text" id="threadSubject" placeholder="例如：數學、英文、程式設計" /></label>
+              <label>標籤 <input type="text" id="threadTags" placeholder="用逗號分隔，例如：問題, 作業, 考試" /></label>
+              <label>圖片 <input type="file" id="threadImages" accept="image/*" multiple /></label>
+              <button type="submit">發問</button>
+            </form>
+          </section>
+
+          <section class="panel thread-list-panel">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">討論串</p>
+                <h3>所有討論</h3>
+              </div>
+              <div class="toolbar">
+                <input type="text" id="threadSearch" placeholder="搜尋標題或內容..." />
+                <select id="threadSubjectFilter">
+                  <option value="">所有科目</option>
+                </select>
+                <select id="threadStatusFilter">
+                  <option value="">所有狀態</option>
+                  <option value="open">開放中</option>
+                  <option value="closed">已結案</option>
+                </select>
+                <select id="threadTagFilter">
+                  <option value="">所有標籤</option>
+                </select>
+              </div>
+            </div>
+            <ul id="threadList" class="thread-list"></ul>
+          </section>
+
+          <section class="panel thread-detail-panel">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">詳細內容</p>
+                <h3 id="threadDetailTitle">請選擇討論串</h3>
+              </div>
+              <div id="threadActions" class="thread-actions hidden">
+                <button id="closeThreadBtn" class="secondary small" type="button">結案</button>
+              </div>
+            </div>
+            <div id="threadDetail" class="thread-detail empty-state">請從左側選擇討論串查看詳細內容。</div>
+            <div id="threadReplies" class="thread-replies hidden">
+              <h4>回覆</h4>
+              <ul id="replyList" class="reply-list"></ul>
+              <form id="replyForm" class="reply-form">
+                <label>回覆內容 <textarea id="replyContent" rows="3" required></textarea></label>
+                <label>圖片 <input type="file" id="replyImages" accept="image/*" multiple /></label>
+                <button type="submit">回覆</button>
+              </form>
             </div>
           </section>
         </div>
