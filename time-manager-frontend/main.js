@@ -6,6 +6,19 @@ const LS_FOCUS_TASK_KEY = "timeManager_current_focus_task_v2";
 const LANGUAGE_ZH = "zh-Hant";
 const LANGUAGE_EN = "en";
 const PAGE_ORDER = ["dashboard", "focus", "tasks", "learning", "ai", "settings"];
+const DASHBOARD_CHART_IDS = [
+  "focusMinutesChart",
+  "completedTasksChart",
+  "categoryTimeChart",
+  "estimateActualChart",
+  "distractionChart",
+  "qualityChart",
+  "learningProgressChart"
+];
+const PAGE_CHART_IDS = {
+  dashboard: DASHBOARD_CHART_IDS,
+  learning: ["learningSubjectChart"]
+};
 
 const DEFAULT_API_BASE = ["localhost", "127.0.0.1"].includes(location.hostname)
   ? "http://127.0.0.1:3000"
@@ -707,16 +720,17 @@ function switchPageByOffset(offset) {
 }
 
 function handleKeyboardShortcuts(event) {
-  if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.isComposing) return;
+  if (event.defaultPrevented || event.altKey || event.metaKey || event.isComposing) return;
 
-  if (event.key === "Tab") {
+  if (event.key === "Tab" && event.ctrlKey) {
     if (!$("authModal")?.classList.contains("hidden")) return;
     event.preventDefault();
+    if (event.repeat) return;
     switchPageByOffset(event.shiftKey ? -1 : 1);
     return;
   }
 
-  if (event.key === "Escape") {
+  if (event.key === "Escape" && !event.ctrlKey) {
     event.preventDefault();
     $("authModal")?.classList.add("hidden");
     setPage("settings");
@@ -841,6 +855,7 @@ function setPage(page) {
   });
 
   updatePageHeader();
+  cleanupChartsForPage();
   renderAll();
 }
 
@@ -882,6 +897,7 @@ function renderTaskList() {
     return;
   }
 
+  const fragment = document.createDocumentFragment();
   tasks.forEach((task) => {
     task.score = calculateTaskScore(task);
     const li = document.createElement("li");
@@ -960,9 +976,10 @@ function renderTaskList() {
       renderAll();
     };
 
-    list.appendChild(li);
+    fragment.appendChild(li);
   });
 
+  list.appendChild(fragment);
   initSortable();
 }
 
@@ -1480,8 +1497,35 @@ function isElementVisible(el) {
 function createChart(canvasId, config) {
   const canvas = $(canvasId);
   if (!canvas || !window.Chart || !isElementVisible(canvas)) return;
-  if (chartInstances[canvasId]) chartInstances[canvasId].destroy();
+  const existing = chartInstances[canvasId] || window.Chart.getChart?.(canvas);
+
+  if (existing && existing.config?.type === config.type) {
+    existing.data = config.data;
+    existing.options = config.options;
+    try {
+      existing.update("none");
+    } catch (_) {
+      existing.update();
+    }
+    chartInstances[canvasId] = existing;
+    return;
+  }
+
+  if (existing) existing.destroy();
   chartInstances[canvasId] = new Chart(canvas.getContext("2d"), config);
+}
+
+function destroyChart(canvasId) {
+  const chart = chartInstances[canvasId] || window.Chart?.getChart?.($(canvasId));
+  if (chart) chart.destroy();
+  delete chartInstances[canvasId];
+}
+
+function cleanupChartsForPage(page = currentPage) {
+  const keep = new Set(PAGE_CHART_IDS[page] || []);
+  Object.keys(chartInstances).forEach((canvasId) => {
+    if (!keep.has(canvasId)) destroyChart(canvasId);
+  });
 }
 
 function getCategoryTimeData() {
@@ -1643,6 +1687,7 @@ function renderLearning() {
   }
 
   list.innerHTML = "";
+  const fragment = document.createDocumentFragment();
   subjects.forEach((subject) => {
     const item = document.createElement("li");
     const subjectPercent = subject.targetMinutes > 0 ? Math.min(100, Math.round((subject.studiedMinutes / subject.targetMinutes) * 100)) : 0;
@@ -1673,8 +1718,9 @@ function renderLearning() {
     item.querySelector(".add5").onclick = () => addStudyMinutes(subject.id, 5);
     item.querySelector(".review").onclick = () => completeReview(subject.id);
     item.querySelector(".remove").onclick = () => removeSubject(subject.id);
-    list.appendChild(item);
+    fragment.appendChild(item);
   });
+  list.appendChild(fragment);
 }
 
 function addSubject(event) {
@@ -2119,20 +2165,53 @@ async function handleDeleteAccount() {
   }
 }
 
-function renderAll() {
-  appData = normalizeAppData(appData);
+function ensureCurrentFocusTaskExists() {
   if (currentTaskIdForPomodoro && !appData.tasks.some((task) => task.id === currentTaskIdForPomodoro)) {
     currentTaskIdForPomodoro = null;
   }
-  renderMetrics();
-  renderFocusPage();
-  renderTaskList();
-  renderLearning();
-  renderLearningHeatmaps();
-  renderCharts();
-  renderAILogs();
-  renderSettingsUserInfo();
-  loadReflection();
+}
+
+function renderCurrentPage() {
+  if (currentPage === "dashboard") {
+    renderMetrics();
+    renderFocusCards();
+    renderHeatmap("learningHeatmapDashboard");
+    renderCharts();
+    loadReflection();
+    return;
+  }
+
+  if (currentPage === "focus") {
+    renderFocusPage();
+    return;
+  }
+
+  if (currentPage === "tasks") {
+    renderTaskList();
+    return;
+  }
+
+  if (currentPage === "learning") {
+    renderLearning();
+    renderHeatmap("learningHeatmapLearning");
+    renderCharts();
+    return;
+  }
+
+  if (currentPage === "ai") {
+    if (lastAIResult) renderAIResult(lastAIResult);
+    renderAILogs();
+    return;
+  }
+
+  if (currentPage === "settings") {
+    renderSettingsUserInfo();
+  }
+}
+
+function renderAll() {
+  ensureCurrentFocusTaskExists();
+  renderCurrentPage();
 }
 
 function bindEvents() {
