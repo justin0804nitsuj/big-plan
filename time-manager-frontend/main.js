@@ -5,7 +5,14 @@ const LS_FOCUS_TASK_KEY = "timeManager_current_focus_task_v2";
 
 const LANGUAGE_ZH = "zh-Hant";
 const LANGUAGE_EN = "en";
-const PAGE_ORDER = ["dashboard", "focus", "tasks", "learning", "ai", "settings"];
+const PAGE_ORDER = ["dashboard", "focus", "tasks", "learning", "friends", "ai", "settings"];
+const QUICK_MESSAGES = [
+  "我要開始專注 25 分鐘",
+  "一起讀書嗎？",
+  "我現在先處理任務",
+  "休息一下",
+  "等我 5 分鐘"
+];
 const DASHBOARD_CHART_IDS = [
   "focusMinutesChart",
   "completedTasksChart",
@@ -74,6 +81,18 @@ const PAGE_DEFAULTS = {
       subtitle: "Manage subject progress, review intervals, and study heat in one place so memory work becomes actionable."
     }
   },
+  friends: {
+    zh: {
+      title: "Friends+ 協作",
+      eyebrow: "好友",
+      subtitle: "用私訊、任務共享與同步專注，把個人節奏延伸成可靠的協作。"
+    },
+    en: {
+      title: "Friends+ Collaboration",
+      eyebrow: "Friends",
+      subtitle: "Use messaging, shared tasks, and synchronized focus sessions to turn personal rhythm into collaboration."
+    }
+  },
   ai: {
     zh: {
       title: "AI 助理",
@@ -117,6 +136,16 @@ let saveDataDebounceTimer = null;
 let chartInstances = {};
 let lastAIResult = null;
 let syncStatusState = "localReady";
+let friendsState = {
+  friends: [],
+  requests: { incoming: [], outgoing: [] },
+  selectedFriendId: null,
+  messages: [],
+  sharedTasks: [],
+  focusRoom: null,
+  focusPollTimer: null,
+  focusPollFriendId: null
+};
 
 const timerState = {
   remainingSeconds: 25 * 60,
@@ -173,6 +202,7 @@ function pageLabel(page) {
     focus: ui("專注", "Focus"),
     tasks: ui("任務", "Tasks"),
     learning: ui("學習", "Learning"),
+    friends: ui("好友", "Friends"),
     ai: ui("AI 助理", "AI Assistant"),
     settings: ui("設定", "Settings")
   }[page] || page;
@@ -644,6 +674,41 @@ function applyLanguage() {
   setText("#page-learning > .panel .eyebrow", ui("複習佇列", "Review Queue"));
   setText("#page-learning > .panel h3", ui("科目清單", "Subject List"));
 
+  setText("#page-friends .friend-list-panel .eyebrow", ui("好友列表", "Friend List"));
+  setText("#page-friends .friend-list-panel h3", ui("我的好友", "My Friends"));
+  setText("#page-friends .friend-request-panel .eyebrow", ui("好友邀請", "Friend Requests"));
+  setText("#page-friends .friend-request-panel h3", ui("新增與回覆邀請", "Invite and Respond"));
+  setControlLabel("friendInviteEmail", ui("好友 Email 或 userId", "Friend email or userId"));
+  setPlaceholder("friendInviteEmail", ui("friend@example.com", "friend@example.com"));
+  setText("#friendInviteForm button[type='submit']", ui("送出邀請", "Send invite"));
+  setText("#page-friends .chat-panel .eyebrow", ui("私訊聊天區", "Direct Messages"));
+  setPlaceholder("messageInput", ui("輸入訊息...", "Type a message..."));
+  setText("#messageForm button[type='submit']", ui("送出", "Send"));
+  document.querySelectorAll(".quick-message").forEach((button, index) => {
+    const zh = QUICK_MESSAGES[index] || button.dataset.message || button.textContent;
+    const en = [
+      "I am starting a 25-minute focus",
+      "Study together?",
+      "I am handling a task first",
+      "Taking a break",
+      "Wait 5 minutes for me"
+    ][index] || zh;
+    const text = ui(zh, en);
+    button.textContent = text;
+    button.dataset.message = text;
+  });
+  setText("#page-friends .task-share-panel .eyebrow", ui("任務共享區", "Shared Tasks"));
+  $("shareTaskSelect")?.setAttribute("aria-label", ui("選擇要分享的任務", "Choose a task to share"));
+  setText("#shareTaskBtn", ui("分享任務", "Share task"));
+  setText("#page-friends .focus-room-panel .eyebrow", ui("一起專注區", "Focus Together"));
+  setControlLabel("focusRoomMinutesInput", ui("專注分鐘", "Focus minutes"));
+  setText("#createFocusRoomBtn", ui("邀請一起專注", "Invite to focus"));
+  setText("#page-friends .friend-meta-panel .eyebrow", ui("好友暱稱 / 備註設定", "Nickname / Notes"));
+  setControlLabel("friendNicknameInput", ui("自訂暱稱", "Custom nickname"));
+  setControlLabel("friendNoteInput", ui("備註", "Notes"));
+  setText("#friendMetaForm button[type='submit']", ui("儲存好友設定", "Save friend settings"));
+  if (currentPage === "friends") renderFriendsContent();
+
   setText("#page-ai .ai-layout > .panel:nth-child(1) .eyebrow", ui("動作", "Actions"));
   setText("#page-ai .ai-layout > .panel:nth-child(1) h3", ui("AI 輔助入口", "AI Actions"));
   setText(".ai-action[data-ai-action='plan-day']", ui("幫我安排今天", "Plan my day"));
@@ -738,9 +803,10 @@ function handleKeyboardShortcuts(event) {
 }
 
 async function apiRequest(path, options = {}) {
+  const { headers = {}, ...restOptions } = options;
   const res = await fetch(API_BASE + path, {
-    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
-    ...options
+    ...restOptions,
+    headers: { "Content-Type": "application/json", ...headers }
   });
 
   if (!res.ok) {
@@ -753,6 +819,19 @@ async function apiRequest(path, options = {}) {
   }
 
   return res.status === 204 ? null : res.json();
+}
+
+async function authenticatedApiRequest(path, options = {}) {
+  if (authState.mode !== "user" || !authState.token) {
+    throw new Error(ui("請先登入。", "Please sign in first."));
+  }
+  return apiRequest(path, {
+    ...options,
+    headers: {
+      Authorization: `Bearer ${authState.token}`,
+      ...(options.headers || {})
+    }
+  });
 }
 
 function loadAuthState() {
@@ -845,7 +924,9 @@ function mergeAppData(baseData, incomingData) {
 }
 
 function setPage(page) {
+  const previousPage = currentPage;
   currentPage = PAGE_DEFAULTS[page] ? page : "dashboard";
+  if (previousPage === "friends" && currentPage !== "friends") stopFocusRoomPolling();
   document.querySelectorAll(".page").forEach((section) => {
     section.classList.toggle("active", section.id === `page-${currentPage}`);
   });
@@ -2042,6 +2123,560 @@ function renderAILogs() {
   `).join("");
 }
 
+function selectedFriend() {
+  return friendsState.friends.find((friend) => friend.id === friendsState.selectedFriendId) || null;
+}
+
+function friendDisplayName(friend) {
+  if (!friend) return ui("未選擇好友", "No friend selected");
+  return friend.nickname || friend.originalName || friend.name || friend.email || friend.id;
+}
+
+function formatDateTime(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value).slice(0, 16).replace("T", " ");
+  return date.toLocaleString(isEnglish() ? "en-US" : "zh-TW", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+
+function formatTimer(seconds) {
+  const safe = Math.max(0, Math.floor(Number(seconds) || 0));
+  const minutes = Math.floor(safe / 60);
+  const rest = safe % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(rest).padStart(2, "0")}`;
+}
+
+function stopFocusRoomPolling() {
+  if (friendsState.focusPollTimer) clearInterval(friendsState.focusPollTimer);
+  friendsState.focusPollTimer = null;
+  friendsState.focusPollFriendId = null;
+}
+
+function resetFriendsState() {
+  stopFocusRoomPolling();
+  friendsState = {
+    friends: [],
+    requests: { incoming: [], outgoing: [] },
+    selectedFriendId: null,
+    messages: [],
+    sharedTasks: [],
+    focusRoom: null,
+    focusPollTimer: null,
+    focusPollFriendId: null
+  };
+}
+
+function selectFriend(friendId) {
+  const changed = friendsState.selectedFriendId !== friendId;
+  if (changed) {
+    friendsState.messages = [];
+    friendsState.focusRoom = null;
+    if (friendsState.focusPollFriendId !== friendId) stopFocusRoomPolling();
+  }
+  friendsState.selectedFriendId = friendId;
+  const friend = selectedFriend();
+  if (!friend) return;
+  const nickname = $("friendNicknameInput");
+  const note = $("friendNoteInput");
+  if (nickname) nickname.value = friend.nickname || "";
+  if (note) note.value = friend.note || "";
+}
+
+async function fetchFriends() {
+  if (authState.mode !== "user") {
+    friendsState.friends = [];
+    return [];
+  }
+  const data = await authenticatedApiRequest("/friends/list");
+  friendsState.friends = Array.isArray(data.friends) ? data.friends : [];
+  if (friendsState.selectedFriendId && !friendsState.friends.some((friend) => friend.id === friendsState.selectedFriendId)) {
+    friendsState.selectedFriendId = null;
+    friendsState.messages = [];
+    friendsState.focusRoom = null;
+  }
+  return friendsState.friends;
+}
+
+async function fetchFriendRequests() {
+  if (authState.mode !== "user") {
+    friendsState.requests = { incoming: [], outgoing: [] };
+    return friendsState.requests;
+  }
+  const data = await authenticatedApiRequest("/friends/requests");
+  friendsState.requests = {
+    incoming: Array.isArray(data.incoming) ? data.incoming : [],
+    outgoing: Array.isArray(data.outgoing) ? data.outgoing : []
+  };
+  return friendsState.requests;
+}
+
+async function sendFriendRequest() {
+  if (authState.mode !== "user") return alert(ui("請先登入。", "Please sign in first."));
+  const input = $("friendInviteEmail");
+  const value = input?.value.trim();
+  if (!value) return;
+  const payload = value.includes("@") ? { email: value } : { friendId: value };
+  try {
+    await authenticatedApiRequest("/friends/request", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+    input.value = "";
+    await fetchFriendRequests();
+    renderFriendsContent();
+    showToast(ui("好友邀請已送出", "Friend request sent"));
+  } catch (err) {
+    alert(ui(`送出邀請失敗：${err.message}`, `Could not send request: ${err.message}`));
+  }
+}
+
+async function acceptFriendRequest(friendId) {
+  try {
+    await authenticatedApiRequest("/friends/accept", {
+      method: "POST",
+      body: JSON.stringify({ friendId })
+    });
+    await Promise.all([fetchFriends(), fetchFriendRequests()]);
+    renderFriendsContent();
+    showToast(ui("已接受好友邀請", "Friend request accepted"));
+  } catch (err) {
+    alert(ui(`接受失敗：${err.message}`, `Accept failed: ${err.message}`));
+  }
+}
+
+async function rejectFriendRequest(friendId) {
+  try {
+    await authenticatedApiRequest("/friends/reject", {
+      method: "POST",
+      body: JSON.stringify({ friendId })
+    });
+    await fetchFriendRequests();
+    renderFriendsContent();
+    showToast(ui("已拒絕好友邀請", "Friend request rejected"));
+  } catch (err) {
+    alert(ui(`拒絕失敗：${err.message}`, `Reject failed: ${err.message}`));
+  }
+}
+
+async function updateFriendMeta() {
+  const friend = selectedFriend();
+  if (!friend) return alert(ui("請先選擇好友。", "Choose a friend first."));
+  try {
+    await authenticatedApiRequest("/friends/meta", {
+      method: "POST",
+      body: JSON.stringify({
+        friendId: friend.id,
+        nickname: $("friendNicknameInput")?.value || "",
+        note: $("friendNoteInput")?.value || ""
+      })
+    });
+    await fetchFriends();
+    selectFriend(friend.id);
+    renderFriendsContent();
+    showToast(ui("好友設定已儲存", "Friend settings saved"));
+  } catch (err) {
+    alert(ui(`儲存失敗：${err.message}`, `Save failed: ${err.message}`));
+  }
+}
+
+async function openChat(friendId) {
+  selectFriend(friendId);
+  await fetchMessages(friendId);
+  renderFriendsContent();
+}
+
+async function fetchMessages(friendId) {
+  if (!friendId || authState.mode !== "user") {
+    friendsState.messages = [];
+    return [];
+  }
+  const data = await authenticatedApiRequest(`/messages/${encodeURIComponent(friendId)}`);
+  friendsState.messages = Array.isArray(data.messages) ? data.messages : [];
+  return friendsState.messages;
+}
+
+async function sendMessage(friendId, content, type = "text") {
+  if (!friendId) return alert(ui("請先選擇好友。", "Choose a friend first."));
+  const message = String(content || "").trim();
+  if (!message) return;
+  try {
+    await authenticatedApiRequest("/messages/send", {
+      method: "POST",
+      body: JSON.stringify({ friendId, content: message, type })
+    });
+    await fetchMessages(friendId);
+    renderMessages();
+  } catch (err) {
+    alert(ui(`訊息送出失敗：${err.message}`, `Message failed: ${err.message}`));
+  }
+}
+
+function renderMessages() {
+  const list = $("messageList");
+  const friend = selectedFriend();
+  if (!list) return;
+  if (!friend) {
+    list.innerHTML = `<p class="empty-state">${ui("請先從好友列表選擇聊天對象。", "Choose a friend from the list first.")}</p>`;
+    return;
+  }
+  if (!friendsState.messages.length) {
+    list.innerHTML = `<p class="empty-state">${ui("還沒有訊息，傳一個快速訊息開始。", "No messages yet. Send a quick message to start.")}</p>`;
+    return;
+  }
+  list.innerHTML = friendsState.messages.map((message) => {
+    const isMe = message.senderId === authState.user?.id;
+    return `
+      <div class="message-bubble ${isMe ? "me" : "friend"}">
+        <p>${escapeHtml(message.content)}</p>
+        <span>${message.type === "quick" ? ui("快速訊息", "Quick") : ui("文字", "Text")} · ${formatDateTime(message.createdAt)}</span>
+      </div>
+    `;
+  }).join("");
+  list.scrollTop = list.scrollHeight;
+}
+
+async function shareTaskWithFriend(friendId, taskId) {
+  if (!friendId) return alert(ui("請先選擇好友。", "Choose a friend first."));
+  if (!taskId) return alert(ui("請先選擇要分享的任務。", "Choose a task to share first."));
+  try {
+    await authenticatedApiRequest("/tasks/share", {
+      method: "POST",
+      body: JSON.stringify({ friendId, taskId })
+    });
+    showToast(ui("任務已分享給好友", "Task shared with friend"));
+  } catch (err) {
+    alert(ui(`分享失敗：${err.message}`, `Share failed: ${err.message}`));
+  }
+}
+
+async function fetchIncomingSharedTasks() {
+  if (authState.mode !== "user") {
+    friendsState.sharedTasks = [];
+    return [];
+  }
+  const data = await authenticatedApiRequest("/tasks/shared/incoming");
+  friendsState.sharedTasks = Array.isArray(data.shares) ? data.shares : [];
+  return friendsState.sharedTasks;
+}
+
+async function acceptSharedTask(shareId) {
+  try {
+    await authenticatedApiRequest("/tasks/shared/accept", {
+      method: "POST",
+      body: JSON.stringify({ shareId })
+    });
+    await loadUserDataFromServer();
+    await fetchIncomingSharedTasks();
+    renderFriendsContent();
+    showToast(ui("已接受共享任務並加入你的任務清單", "Shared task accepted and added to your task list"));
+  } catch (err) {
+    alert(ui(`接受共享任務失敗：${err.message}`, `Accept shared task failed: ${err.message}`));
+  }
+}
+
+async function rejectSharedTask(shareId) {
+  try {
+    await authenticatedApiRequest("/tasks/shared/reject", {
+      method: "POST",
+      body: JSON.stringify({ shareId })
+    });
+    await fetchIncomingSharedTasks();
+    renderFriendsContent();
+    showToast(ui("已拒絕共享任務", "Shared task rejected"));
+  } catch (err) {
+    alert(ui(`拒絕共享任務失敗：${err.message}`, `Reject shared task failed: ${err.message}`));
+  }
+}
+
+async function createFocusRoom(friendId) {
+  if (!friendId) return alert(ui("請先選擇好友。", "Choose a friend first."));
+  try {
+    selectFriend(friendId);
+    const durationMinutes = Number($("focusRoomMinutesInput")?.value) || appData.settings.focusMinutes || 25;
+    const data = await authenticatedApiRequest("/focus-room/create", {
+      method: "POST",
+      body: JSON.stringify({ friendId, durationMinutes })
+    });
+    friendsState.focusRoom = data.room;
+    renderFriendsContent();
+    pollFocusRoom(friendId);
+    showToast(ui("已邀請好友一起專注", "Focus invitation sent"));
+  } catch (err) {
+    alert(ui(`建立一起專注失敗：${err.message}`, `Could not create focus room: ${err.message}`));
+  }
+}
+
+async function openFocusRoom(friendId) {
+  if (!friendId) return;
+  selectFriend(friendId);
+  try {
+    const room = await fetchActiveFocusRoom(friendId);
+    renderFriendsContent();
+    if (room) pollFocusRoom(friendId);
+    else await createFocusRoom(friendId);
+  } catch (err) {
+    alert(ui(`取得一起專注失敗：${err.message}`, `Could not open focus room: ${err.message}`));
+  }
+}
+
+async function fetchActiveFocusRoom(friendId) {
+  if (!friendId || authState.mode !== "user") return null;
+  const data = await authenticatedApiRequest(`/focus-room/active/${encodeURIComponent(friendId)}`);
+  friendsState.focusRoom = data.room || null;
+  return friendsState.focusRoom;
+}
+
+function pollFocusRoom(friendId) {
+  if (!friendId) return;
+  stopFocusRoomPolling();
+  friendsState.focusPollFriendId = friendId;
+  const tick = async () => {
+    try {
+      const room = await fetchActiveFocusRoom(friendId);
+      if (friendsState.focusPollFriendId !== friendId) return;
+      renderFocusRoom(room);
+      if (!room || room.status === "ended") stopFocusRoomPolling();
+    } catch (_) {
+      stopFocusRoomPolling();
+    }
+  };
+  tick();
+  friendsState.focusPollTimer = setInterval(tick, 2000);
+}
+
+function getFocusRoomRemaining(room) {
+  if (!room) return 0;
+  const total = Math.max(1, Number(room.durationMinutes) || 25) * 60;
+  if (room.status === "running" && room.startedAt) {
+    const elapsed = Math.floor((Date.now() - new Date(room.startedAt).getTime()) / 1000);
+    return Math.max(0, total - elapsed);
+  }
+  return Math.max(0, Number(room.pausedRemainingSeconds ?? room.remainingSeconds ?? total));
+}
+
+async function updateFocusRoom(action) {
+  const room = friendsState.focusRoom;
+  const friend = selectedFriend();
+  if (!room || !friend) return;
+  try {
+    await authenticatedApiRequest(`/focus-room/${action}`, {
+      method: "POST",
+      body: JSON.stringify({ roomId: room.id })
+    });
+    await fetchActiveFocusRoom(friend.id);
+    renderFocusRoom(friendsState.focusRoom);
+    if (action === "end") stopFocusRoomPolling();
+    else pollFocusRoom(friend.id);
+  } catch (err) {
+    alert(ui(`更新一起專注失敗：${err.message}`, `Focus room update failed: ${err.message}`));
+  }
+}
+
+async function joinFocusRoom() {
+  const room = friendsState.focusRoom;
+  const friend = selectedFriend();
+  if (!room || !friend) return;
+  try {
+    await authenticatedApiRequest("/focus-room/join", {
+      method: "POST",
+      body: JSON.stringify({ roomId: room.id })
+    });
+    await fetchActiveFocusRoom(friend.id);
+    renderFocusRoom(friendsState.focusRoom);
+    pollFocusRoom(friend.id);
+  } catch (err) {
+    alert(ui(`加入一起專注失敗：${err.message}`, `Could not join focus room: ${err.message}`));
+  }
+}
+
+function renderFocusRoom(room) {
+  const panel = $("focusRoomPanel");
+  if (!panel) return;
+  const friend = selectedFriend();
+  if (!friend) {
+    panel.className = "focus-room-card empty-state";
+    panel.textContent = ui("請先選擇好友。", "Choose a friend first.");
+    return;
+  }
+  if (!room) {
+    panel.className = "focus-room-card empty-state";
+    panel.textContent = ui("尚未建立一起專注房間。", "No focus room yet.");
+    return;
+  }
+
+  const participantNames = (room.participantIds || []).map((id) => {
+    if (id === authState.user?.id) return ui("你", "You");
+    if (id === friend.id) return friendDisplayName(friend);
+    return id;
+  });
+  const invitedNames = (room.invitedUserIds || []).map((id) => {
+    if (id === authState.user?.id) return ui("你", "You");
+    if (id === friend.id) return friendDisplayName(friend);
+    return id;
+  });
+  const isParticipant = room.participantIds?.includes(authState.user?.id);
+  const isInvited = room.invitedUserIds?.includes(authState.user?.id);
+
+  panel.className = "focus-room-card";
+  panel.innerHTML = `
+    <div class="focus-room-timer">${formatTimer(getFocusRoomRemaining(room))}</div>
+    <div class="task-meta">
+      <span>${ui("狀態", "Status")}: ${escapeHtml(room.status)}</span>
+      <span>${ui("時長", "Duration")}: ${Number(room.durationMinutes) || 25} ${ui("分", "min")}</span>
+      <span>${ui("參與者", "Participants")}: ${escapeHtml(participantNames.join(", ") || "-")}</span>
+      ${invitedNames.length ? `<span>${ui("已邀請", "Invited")}: ${escapeHtml(invitedNames.join(", "))}</span>` : ""}
+    </div>
+    <div class="button-row focus-room-actions">
+      ${isInvited ? `<button id="joinFocusRoomBtn" type="button">${ui("加入", "Join")}</button>` : ""}
+      ${isParticipant ? `<button id="focusRoomStartBtn" type="button">${ui("開始", "Start")}</button>` : ""}
+      ${isParticipant ? `<button id="focusRoomPauseBtn" class="secondary" type="button">${ui("暫停", "Pause")}</button>` : ""}
+      ${isParticipant ? `<button id="focusRoomResetBtn" class="secondary" type="button">${ui("重設", "Reset")}</button>` : ""}
+      ${isParticipant ? `<button id="focusRoomEndBtn" class="danger" type="button">${ui("結束", "End")}</button>` : ""}
+    </div>
+  `;
+  $("joinFocusRoomBtn")?.addEventListener("click", joinFocusRoom);
+  $("focusRoomStartBtn")?.addEventListener("click", () => updateFocusRoom("start"));
+  $("focusRoomPauseBtn")?.addEventListener("click", () => updateFocusRoom("pause"));
+  $("focusRoomResetBtn")?.addEventListener("click", () => updateFocusRoom("reset"));
+  $("focusRoomEndBtn")?.addEventListener("click", () => updateFocusRoom("end"));
+}
+
+function renderFriendsContent() {
+  const friendList = $("friendList");
+  if (!friendList) return;
+
+  const signedIn = authState.mode === "user";
+  const friend = selectedFriend();
+  setText("#friendCountLabel", String(friendsState.friends.length));
+  setText("#chatFriendName", friend ? friendDisplayName(friend) : ui("選擇好友開始聊天", "Choose a friend to chat"));
+  setText("#shareFriendName", friend ? ui(`分享任務給 ${friendDisplayName(friend)}`, `Share a task with ${friendDisplayName(friend)}`) : ui("選擇好友分享任務", "Choose a friend to share a task"));
+  setText("#focusRoomFriendName", friend ? ui(`和 ${friendDisplayName(friend)} 一起專注`, `Focus with ${friendDisplayName(friend)}`) : ui("選擇好友一起專注", "Choose a friend to focus together"));
+  setText("#metaFriendName", friend ? ui(`設定 ${friendDisplayName(friend)}`, `Settings for ${friendDisplayName(friend)}`) : ui("選擇好友設定備註", "Choose a friend for notes"));
+
+  if (!signedIn) {
+    friendList.innerHTML = `<p class="empty-state">${ui("請先登入才能使用 Friends+。", "Sign in to use Friends+.")}</p>`;
+    $("friendRequestsList").innerHTML = "";
+    $("incomingSharedTasks").innerHTML = "";
+    renderMessages();
+    renderFocusRoom(null);
+    return;
+  }
+
+  if (!friendsState.friends.length) {
+    friendList.innerHTML = `<p class="empty-state">${ui("尚無好友。用 Email 送出第一個好友邀請。", "No friends yet. Send your first invite by email.")}</p>`;
+  } else {
+    friendList.innerHTML = friendsState.friends.map((item) => `
+      <article class="friend-card ${item.id === friendsState.selectedFriendId ? "active" : ""}" data-friend-id="${escapeHtml(item.id)}">
+        <div>
+          <strong>${escapeHtml(item.originalName || item.name)}</strong>
+          <p>${item.nickname ? `${ui("暱稱", "Nickname")}: ${escapeHtml(item.nickname)}` : ui("尚未設定暱稱", "No nickname set")}</p>
+        </div>
+        <div class="friend-stats">
+          <span>${Number(item.today?.focusMinutes || 0)} ${ui("分", "min")}</span>
+          <span>${Number(item.today?.completedTasks || 0)} ${ui("件完成", "done")}</span>
+        </div>
+        <div class="friend-actions">
+          <button class="small friend-chat" type="button">${ui("聊天", "Chat")}</button>
+          <button class="small secondary friend-share" type="button">${ui("共享任務", "Share task")}</button>
+          <button class="small secondary friend-focus" type="button">${ui("一起專注", "Focus together")}</button>
+          <button class="small secondary friend-meta" type="button">${ui("設定備註", "Notes")}</button>
+        </div>
+      </article>
+    `).join("");
+    friendList.querySelectorAll(".friend-card").forEach((card) => {
+      const friendId = card.dataset.friendId;
+      card.querySelector(".friend-chat").onclick = () => openChat(friendId);
+      card.querySelector(".friend-share").onclick = () => { selectFriend(friendId); renderFriendsContent(); };
+      card.querySelector(".friend-focus").onclick = () => openFocusRoom(friendId);
+      card.querySelector(".friend-meta").onclick = () => { selectFriend(friendId); renderFriendsContent(); $("friendNicknameInput")?.focus(); };
+    });
+  }
+
+  const requests = $("friendRequestsList");
+  if (requests) {
+    const incoming = friendsState.requests.incoming || [];
+    const outgoing = friendsState.requests.outgoing || [];
+    requests.innerHTML = `
+      <div class="request-group">
+        <h4>${ui("收到的邀請", "Incoming requests")}</h4>
+        ${incoming.length ? incoming.map((item) => `
+          <div class="settings-row request-row">
+            <span>${escapeHtml(item.name)} · ${escapeHtml(item.email)}</span>
+            <strong>
+              <button class="small accept-request" data-id="${escapeHtml(item.id)}" type="button">${ui("接受", "Accept")}</button>
+              <button class="small secondary reject-request" data-id="${escapeHtml(item.id)}" type="button">${ui("拒絕", "Reject")}</button>
+            </strong>
+          </div>
+        `).join("") : `<p class="empty-state">${ui("沒有待回覆邀請。", "No incoming requests.")}</p>`}
+      </div>
+      <div class="request-group">
+        <h4>${ui("已送出的邀請", "Outgoing requests")}</h4>
+        ${outgoing.length ? outgoing.map((item) => `<p class="note">${escapeHtml(item.name)} · ${escapeHtml(item.email)}</p>`).join("") : `<p class="empty-state">${ui("沒有送出的邀請。", "No outgoing requests.")}</p>`}
+      </div>
+    `;
+    requests.querySelectorAll(".accept-request").forEach((button) => {
+      button.onclick = () => acceptFriendRequest(button.dataset.id);
+    });
+    requests.querySelectorAll(".reject-request").forEach((button) => {
+      button.onclick = () => rejectFriendRequest(button.dataset.id);
+    });
+  }
+
+  const taskSelect = $("shareTaskSelect");
+  if (taskSelect) {
+    const tasks = appData.tasks.filter((task) => task.status !== "done");
+    taskSelect.innerHTML = `<option value="">${ui("選擇任務", "Choose a task")}</option>${tasks.map((task) => `<option value="${escapeHtml(task.id)}">${escapeHtml(task.title)}</option>`).join("")}`;
+  }
+
+  const shared = $("incomingSharedTasks");
+  if (shared) {
+    shared.innerHTML = `
+      <h4>${ui("收到的共享任務", "Incoming shared tasks")}</h4>
+      ${friendsState.sharedTasks.length ? friendsState.sharedTasks.map((share) => `
+        <article class="shared-task-card">
+          <strong>${escapeHtml(share.taskSnapshot?.title || ui("未命名任務", "Untitled task"))}</strong>
+          <p>${ui("來自", "From")}: ${escapeHtml(share.sender?.name || share.senderId)}</p>
+          <div class="button-row">
+            <button class="small accept-share" data-id="${escapeHtml(share.id)}" type="button">${ui("接受", "Accept")}</button>
+            <button class="small secondary reject-share" data-id="${escapeHtml(share.id)}" type="button">${ui("拒絕", "Reject")}</button>
+          </div>
+        </article>
+      `).join("") : `<p class="empty-state">${ui("目前沒有待處理的共享任務。", "No shared tasks waiting.")}</p>`}
+    `;
+    shared.querySelectorAll(".accept-share").forEach((button) => {
+      button.onclick = () => acceptSharedTask(button.dataset.id);
+    });
+    shared.querySelectorAll(".reject-share").forEach((button) => {
+      button.onclick = () => rejectSharedTask(button.dataset.id);
+    });
+  }
+
+  renderMessages();
+  renderFocusRoom(friendsState.focusRoom);
+}
+
+async function renderFriends() {
+  const friendList = $("friendList");
+  if (!friendList) return;
+  if (authState.mode !== "user") {
+    friendsState = { ...friendsState, friends: [], requests: { incoming: [], outgoing: [] }, messages: [], sharedTasks: [], focusRoom: null };
+    renderFriendsContent();
+    return;
+  }
+  friendList.innerHTML = `<p class="empty-state">${ui("載入 Friends+ 中...", "Loading Friends+...")}</p>`;
+  try {
+    await Promise.all([fetchFriends(), fetchFriendRequests(), fetchIncomingSharedTasks()]);
+    renderFriendsContent();
+  } catch (err) {
+    friendList.innerHTML = `<p class="empty-state">${escapeHtml(ui(`好友資料載入失敗：${err.message}`, `Could not load friends: ${err.message}`))}</p>`;
+  }
+}
+
 function updateAuthUI() {
   $("authStatusLabel").textContent = authState.mode === "user"
     ? ui(`${authState.user?.name || "使用者"} · 已登入`, `${authState.user?.name || "User"} · Signed in`)
@@ -2092,6 +2727,7 @@ function logout() {
   if (!confirm(ui("確定要登出？登入資料會保留在伺服器，畫面會切回訪客資料。", "Sign out? Synced data will remain on the server and the app will switch back to guest data."))) return;
   authState = { mode: "guest", user: null, token: null };
   saveAuthState();
+  resetFriendsState();
   appData = normalizeAppData(JSON.parse(localStorage.getItem(LS_GUEST_KEY) || "{}"));
   currentTaskIdForPomodoro = localStorage.getItem(LS_FOCUS_TASK_KEY);
   updateAuthUI();
@@ -2155,6 +2791,7 @@ async function handleDeleteAccount() {
     localStorage.removeItem(LS_AUTH_KEY);
     localStorage.removeItem(LS_USER_CACHE_KEY);
     authState = { mode: "guest", user: null, token: null };
+    resetFriendsState();
     appData = normalizeAppData(JSON.parse(localStorage.getItem(LS_GUEST_KEY) || "{}"));
     updateAuthUI();
     renderAll();
@@ -2194,6 +2831,11 @@ function renderCurrentPage() {
     renderLearning();
     renderHeatmap("learningHeatmapLearning");
     renderCharts();
+    return;
+  }
+
+  if (currentPage === "friends") {
+    renderFriends();
     return;
   }
 
@@ -2238,6 +2880,26 @@ function bindEvents() {
   $("learningForm").onsubmit = addSubject;
   $("exportJsonBtn").onclick = exportJson;
   $("importJsonInput").onchange = (event) => importJson(event.target.files?.[0]);
+  $("friendInviteForm").onsubmit = (event) => {
+    event.preventDefault();
+    sendFriendRequest();
+  };
+  $("messageForm").onsubmit = (event) => {
+    event.preventDefault();
+    const friend = selectedFriend();
+    const input = $("messageInput");
+    sendMessage(friend?.id, input?.value || "", "text");
+    if (input) input.value = "";
+  };
+  document.querySelectorAll(".quick-message").forEach((button) => {
+    button.onclick = () => sendMessage(friendsState.selectedFriendId, button.dataset.message || button.textContent, "quick");
+  });
+  $("shareTaskBtn").onclick = () => shareTaskWithFriend(friendsState.selectedFriendId, $("shareTaskSelect")?.value || "");
+  $("createFocusRoomBtn").onclick = () => createFocusRoom(friendsState.selectedFriendId);
+  $("friendMetaForm").onsubmit = (event) => {
+    event.preventDefault();
+    updateFriendMeta();
+  };
 
   document.querySelectorAll(".ai-action").forEach((button) => {
     button.onclick = () => handleAIAction(button.dataset.aiAction);

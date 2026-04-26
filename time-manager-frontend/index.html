@@ -22,6 +22,7 @@
         <button class="nav-link" data-page="focus" type="button">專注</button>
         <button class="nav-link" data-page="tasks" type="button">任務</button>
         <button class="nav-link" data-page="learning" type="button">學習</button>
+        <button class="nav-link" data-page="friends" type="button">好友</button>
         <button class="nav-link" data-page="ai" type="button">AI 助理</button>
         <button class="nav-link" data-page="settings" type="button">設定</button>
       </nav>
@@ -321,6 +322,104 @@
           </div>
           <ul id="learningList" class="learning-list"></ul>
         </section>
+      </section>
+
+      <section id="page-friends" class="page" data-page-title="Friends+ 協作" data-page-eyebrow="好友" data-page-subtitle="用私訊、任務共享與同步專注，把個人節奏延伸成可靠的協作。">
+        <div class="friends-layout">
+          <section class="panel friend-list-panel">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">好友列表</p>
+                <h3>我的好友</h3>
+              </div>
+              <span id="friendCountLabel" class="status-pill">0</span>
+            </div>
+            <div id="friendList" class="friend-list"></div>
+          </section>
+
+          <section class="panel friend-request-panel">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">好友邀請</p>
+                <h3>新增與回覆邀請</h3>
+              </div>
+            </div>
+            <form id="friendInviteForm" class="friend-invite-form">
+              <label>
+                好友 Email 或 userId
+                <input id="friendInviteEmail" type="text" placeholder="friend@example.com" />
+              </label>
+              <button type="submit">送出邀請</button>
+            </form>
+            <div id="friendRequestsList" class="friend-requests"></div>
+          </section>
+
+          <section class="panel chat-panel">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">私訊聊天區</p>
+                <h3 id="chatFriendName">選擇好友開始聊天</h3>
+              </div>
+            </div>
+            <div id="messageList" class="message-list"></div>
+            <div id="quickMessageRow" class="quick-message-row">
+              <button class="quick-message" data-message="我要開始專注 25 分鐘" type="button">我要開始專注 25 分鐘</button>
+              <button class="quick-message" data-message="一起讀書嗎？" type="button">一起讀書嗎？</button>
+              <button class="quick-message" data-message="我現在先處理任務" type="button">我現在先處理任務</button>
+              <button class="quick-message" data-message="休息一下" type="button">休息一下</button>
+              <button class="quick-message" data-message="等我 5 分鐘" type="button">等我 5 分鐘</button>
+            </div>
+            <form id="messageForm" class="message-form">
+              <input id="messageInput" type="text" placeholder="輸入訊息..." />
+              <button type="submit">送出</button>
+            </form>
+          </section>
+
+          <section class="panel task-share-panel">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">任務共享區</p>
+                <h3 id="shareFriendName">選擇好友分享任務</h3>
+              </div>
+            </div>
+            <div class="share-task-controls">
+              <select id="shareTaskSelect" aria-label="選擇要分享的任務"></select>
+              <button id="shareTaskBtn" type="button">分享任務</button>
+            </div>
+            <div id="incomingSharedTasks" class="shared-task-list"></div>
+          </section>
+
+          <section class="panel focus-room-panel">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">一起專注區</p>
+                <h3 id="focusRoomFriendName">選擇好友一起專注</h3>
+              </div>
+            </div>
+            <div class="focus-room-controls">
+              <label>
+                專注分鐘
+                <input id="focusRoomMinutesInput" type="number" min="1" value="25" />
+              </label>
+              <button id="createFocusRoomBtn" type="button">邀請一起專注</button>
+            </div>
+            <div id="focusRoomPanel" class="focus-room-card empty-state">尚未建立一起專注房間。</div>
+          </section>
+
+          <section class="panel friend-meta-panel">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">好友暱稱 / 備註設定</p>
+                <h3 id="metaFriendName">選擇好友設定備註</h3>
+              </div>
+            </div>
+            <form id="friendMetaForm" class="form-grid compact">
+              <label>自訂暱稱 <input id="friendNicknameInput" type="text" /></label>
+              <label class="wide">備註 <textarea id="friendNoteInput" rows="3"></textarea></label>
+              <button class="wide" type="submit">儲存好友設定</button>
+            </form>
+          </section>
+        </div>
       </section>
 
       <section id="page-ai" class="page" data-page-title="AI 助理" data-page-eyebrow="AI" data-page-subtitle="先以模擬回應建立前端資料流程，未來可把 AI 請求改接後端或 OpenAI 介面。">

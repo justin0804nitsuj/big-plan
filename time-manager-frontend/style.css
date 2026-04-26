@@ -668,6 +668,170 @@ h3 {
 .heat-3 { background: #2b9a76; }
 .heat-4 { background: #63e6be; }
 
+.friends-layout {
+  display: grid;
+  grid-template-columns: minmax(320px, .95fr) minmax(0, 1.25fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.friend-list,
+.friend-requests,
+.shared-task-list {
+  display: grid;
+  gap: 10px;
+}
+
+.friend-card,
+.shared-task-card,
+.focus-room-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  padding: 14px;
+}
+
+.friend-card {
+  display: grid;
+  gap: 12px;
+}
+
+.friend-card.active {
+  border-color: rgba(99, 230, 190, .65);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.friend-card strong,
+.shared-task-card strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.friend-card p,
+.shared-task-card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.friend-stats,
+.friend-actions,
+.focus-room-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.friend-stats span {
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  border-radius: 999px;
+  background: #11151c;
+  color: var(--muted);
+  padding: 3px 8px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.friend-invite-form,
+.message-form,
+.share-task-controls,
+.focus-room-controls {
+  display: grid;
+  gap: 10px;
+}
+
+.chat-panel,
+.task-share-panel,
+.focus-room-panel,
+.friend-meta-panel {
+  min-width: 0;
+}
+
+.message-list {
+  min-height: 320px;
+  max-height: 420px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #11151c;
+  padding: 12px;
+}
+
+.message-bubble {
+  width: min(78%, 520px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  background: var(--surface-3);
+}
+
+.message-bubble.me {
+  align-self: flex-end;
+  border-color: rgba(99, 230, 190, .55);
+  background: rgba(99, 230, 190, .14);
+}
+
+.message-bubble.friend {
+  align-self: flex-start;
+}
+
+.message-bubble p {
+  margin: 0;
+}
+
+.message-bubble span {
+  display: block;
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.quick-message-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.quick-message-row button {
+  flex: 1 1 150px;
+  min-height: 34px;
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 7px 10px;
+  font-size: 13px;
+}
+
+.focus-room-card.empty-state {
+  color: var(--muted);
+}
+
+.focus-room-timer {
+  margin-bottom: 12px;
+  font-size: clamp(36px, 7vw, 64px);
+  font-weight: 900;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.request-group + .request-group,
+.shared-task-list h4 {
+  margin-top: 14px;
+}
+
+.request-group h4,
+.shared-task-list h4 {
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+
 .ai-actions {
   align-items: stretch;
 }
@@ -832,6 +996,7 @@ h3 {
   .dashboard-layout,
   .split-layout,
   .learning-layout,
+  .friends-layout,
   .ai-layout,
   .settings-layout {
     grid-template-columns: 1fr;
