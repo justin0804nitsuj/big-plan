@@ -408,6 +408,19 @@ h3 {
   max-height: 220px;
 }
 
+.learning-chart-frame {
+  position: relative;
+  height: 210px;
+  max-height: 210px;
+  overflow: hidden;
+}
+
+.learning-chart-frame canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+}
+
 .focus-mode-shell {
   width: min(820px, 100%);
   margin: 0 auto;

@@ -286,7 +286,9 @@
               <span id="learningSummaryLabel" class="status-pill">0%</span>
             </div>
             <div class="progress-track"><div id="learningProgressBar" class="progress-bar"></div></div>
-            <canvas id="learningSubjectChart" height="180"></canvas>
+            <div class="learning-chart-frame">
+              <canvas id="learningSubjectChart" height="180"></canvas>
+            </div>
             <div id="learningHeatmapLearning" class="heatmap spacious" aria-label="學習熱度圖"></div>
           </section>
 
@@ -426,11 +428,11 @@
             <div class="shortcut-list" aria-label="快捷鍵列表">
               <div class="settings-row shortcut-row">
                 <span id="shortcutNextLabel">切換到下一個左側分頁</span>
-                <strong><kbd>Ctrl</kbd> + <kbd>Tab</kbd></strong>
+                <strong><kbd>Tab</kbd></strong>
               </div>
               <div class="settings-row shortcut-row">
                 <span id="shortcutPrevLabel">切換到上一個左側分頁</span>
-                <strong><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Tab</kbd></strong>
+                <strong><kbd>Shift</kbd> + <kbd>Tab</kbd></strong>
               </div>
               <div class="settings-row shortcut-row">
                 <span id="shortcutSettingsLabel">直接切換到設定</span>

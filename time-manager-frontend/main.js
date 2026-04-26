@@ -720,17 +720,16 @@ function switchPageByOffset(offset) {
 }
 
 function handleKeyboardShortcuts(event) {
-  if (event.defaultPrevented || event.altKey || event.metaKey || event.isComposing) return;
+  if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.isComposing) return;
 
-  if (event.key === "Tab" && event.ctrlKey) {
+  if (event.key === "Tab") {
     if (!$("authModal")?.classList.contains("hidden")) return;
     event.preventDefault();
-    if (event.repeat) return;
     switchPageByOffset(event.shiftKey ? -1 : 1);
     return;
   }
 
-  if (event.key === "Escape" && !event.ctrlKey) {
+  if (event.key === "Escape") {
     event.preventDefault();
     $("authModal")?.classList.add("hidden");
     setPage("settings");
