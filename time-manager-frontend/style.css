@@ -699,6 +699,24 @@ h3 {
   overflow-wrap: anywhere;
 }
 
+.shortcut-list {
+  margin-top: 14px;
+}
+
+.shortcut-row kbd {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 6px;
+  background: #11151c;
+  color: var(--text);
+  padding: 2px 7px;
+  font-size: 12px;
+  font-weight: 900;
+}
+
 .modal {
   position: fixed;
   inset: 0;

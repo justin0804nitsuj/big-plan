@@ -3,6 +3,10 @@ const LS_USER_CACHE_KEY = "timeManager_user_cache_v2";
 const LS_AUTH_KEY = "timeManager_auth_v2";
 const LS_FOCUS_TASK_KEY = "timeManager_current_focus_task_v2";
 
+const LANGUAGE_ZH = "zh-Hant";
+const LANGUAGE_EN = "en";
+const PAGE_ORDER = ["dashboard", "focus", "tasks", "learning", "ai", "settings"];
+
 const DEFAULT_API_BASE = ["localhost", "127.0.0.1"].includes(location.hostname)
   ? "http://127.0.0.1:3000"
   : "https://big-plan.onrender.com";
@@ -10,34 +14,76 @@ const API_BASE = localStorage.getItem("timeManager_api_base") || DEFAULT_API_BAS
 
 const PAGE_DEFAULTS = {
   dashboard: {
-    title: "今日總覽",
-    eyebrow: "Dashboard",
-    subtitle: "用數據、任務與專注儀表板，把今天的注意力放到最值得處理的地方。"
+    zh: {
+      title: "今日總覽",
+      eyebrow: "總覽",
+      subtitle: "用數據、任務與專注儀表板，把今天的注意力放到最值得處理的地方。"
+    },
+    en: {
+      title: "Dashboard",
+      eyebrow: "Dashboard",
+      subtitle: "Use tasks, focus data, and review notes to put your attention where it matters most today."
+    }
   },
   focus: {
-    title: "Deep Focus Mode",
-    eyebrow: "Focus",
-    subtitle: "只保留焦點任務、計時器、專注控制與分心紀錄，讓畫面幫你降噪。"
+    zh: {
+      title: "深度專注模式",
+      eyebrow: "專注",
+      subtitle: "只保留焦點任務、計時器、專注控制與分心紀錄，讓畫面幫你降噪。"
+    },
+    en: {
+      title: "Deep Focus Mode",
+      eyebrow: "Focus",
+      subtitle: "Keep only the focus task, timer, controls, and distraction log so the screen can quiet the noise."
+    }
   },
   tasks: {
-    title: "任務系統",
-    eyebrow: "Tasks",
-    subtitle: "用優先級、能量、任務類型與智慧分數決定下一步，而不是只靠感覺。"
+    zh: {
+      title: "任務系統",
+      eyebrow: "任務",
+      subtitle: "用優先級、能量、任務類型與智慧分數決定下一步，而不是只靠感覺。"
+    },
+    en: {
+      title: "Task System",
+      eyebrow: "Tasks",
+      subtitle: "Use priority, energy, task type, and smart scores to choose the next step without relying only on instinct."
+    }
   },
   learning: {
-    title: "學習計畫",
-    eyebrow: "Learning",
-    subtitle: "把科目進度、複習間隔與學習熱度集中管理，讓記憶曲線變得可操作。"
+    zh: {
+      title: "學習計畫",
+      eyebrow: "學習",
+      subtitle: "把科目進度、複習間隔與學習熱度集中管理，讓記憶曲線變得可操作。"
+    },
+    en: {
+      title: "Learning Plan",
+      eyebrow: "Learning",
+      subtitle: "Manage subject progress, review intervals, and study heat in one place so memory work becomes actionable."
+    }
   },
   ai: {
-    title: "AI Assistant",
-    eyebrow: "AI",
-    subtitle: "先以 mock 回應建立前端資料流程，未來可把 requestAI 改接後端或 OpenAI API。"
+    zh: {
+      title: "AI 助理",
+      eyebrow: "AI",
+      subtitle: "先以模擬回應建立前端資料流程，未來可把 AI 請求改接後端或 OpenAI 介面。"
+    },
+    en: {
+      title: "AI Assistant",
+      eyebrow: "AI",
+      subtitle: "The app starts with mock responses; later the AI request can be wired to a backend or OpenAI API."
+    }
   },
   settings: {
-    title: "設定與資料",
-    eyebrow: "Settings",
-    subtitle: "管理帳號、Focus 時長與 JSON 匯入匯出；Guest 與登入同步都保留。"
+    zh: {
+      title: "設定與資料",
+      eyebrow: "設定",
+      subtitle: "管理帳號、專注時長、語言、快捷鍵與 JSON 匯入匯出；訪客與登入同步都保留。"
+    },
+    en: {
+      title: "Settings and Data",
+      eyebrow: "Settings",
+      subtitle: "Manage account, focus length, language, shortcuts, and JSON import/export for guest or synced data."
+    }
   }
 };
 
@@ -57,6 +103,7 @@ let sortable = null;
 let saveDataDebounceTimer = null;
 let chartInstances = {};
 let lastAIResult = null;
+let syncStatusState = "localReady";
 
 const timerState = {
   remainingSeconds: 25 * 60,
@@ -75,7 +122,8 @@ function getEmptyData() {
     distractions: [],
     settings: {
       focusMinutes: 25,
-      breakMinutes: 5
+      breakMinutes: 5,
+      language: LANGUAGE_ZH
     },
     dailyStats: {},
     learningProgress: {
@@ -87,6 +135,45 @@ function getEmptyData() {
 
 function $(id) {
   return document.getElementById(id);
+}
+
+function getAppLanguage() {
+  return appData?.settings?.language === LANGUAGE_EN ? LANGUAGE_EN : LANGUAGE_ZH;
+}
+
+function isEnglish() {
+  return getAppLanguage() === LANGUAGE_EN;
+}
+
+function ui(zh, en) {
+  return isEnglish() ? en : zh;
+}
+
+function getPageCopy(page) {
+  const copy = PAGE_DEFAULTS[page] || PAGE_DEFAULTS.dashboard;
+  return isEnglish() ? copy.en : copy.zh;
+}
+
+function pageLabel(page) {
+  return {
+    dashboard: ui("總覽", "Dashboard"),
+    focus: ui("專注", "Focus"),
+    tasks: ui("任務", "Tasks"),
+    learning: ui("學習", "Learning"),
+    ai: ui("AI 助理", "AI Assistant"),
+    settings: ui("設定", "Settings")
+  }[page] || page;
+}
+
+function syncStatusText(status) {
+  return {
+    localReady: ui("本機就緒", "Local ready"),
+    guestLocal: ui("訪客本機資料", "Guest local"),
+    syncing: ui("同步中...", "Syncing..."),
+    synced: ui("已同步", "Synced"),
+    syncFailed: ui("同步失敗", "Sync failed"),
+    offlineCache: ui("離線快取", "Offline cache")
+  }[status] || status;
 }
 
 function createId(prefix) {
@@ -247,7 +334,7 @@ function normalizeAILog(log = {}) {
     id: log.id || createId("ai"),
     action: log.action || "unknown",
     requestedAt: log.requestedAt || log.createdAt || new Date().toISOString(),
-    result: log.result && typeof log.result === "object" ? log.result : { title: "AI 回應", summary: String(log.result || "") }
+    result: log.result && typeof log.result === "object" ? log.result : { title: ui("AI 回應", "AI Response"), summary: String(log.result || "") }
   };
 }
 
@@ -265,7 +352,8 @@ function normalizeAppData(data) {
     distractions: Array.isArray(value.distractions) ? value.distractions.map(normalizeDistraction) : [],
     settings: {
       focusMinutes: Math.max(1, Number(value.settings?.focusMinutes) || empty.settings.focusMinutes),
-      breakMinutes: Math.max(1, Number(value.settings?.breakMinutes) || empty.settings.breakMinutes)
+      breakMinutes: Math.max(1, Number(value.settings?.breakMinutes) || empty.settings.breakMinutes),
+      language: value.settings?.language === LANGUAGE_EN ? LANGUAGE_EN : LANGUAGE_ZH
     },
     dailyStats: value.dailyStats && typeof value.dailyStats === "object" ? value.dailyStats : {},
     learningProgress: {
@@ -318,30 +406,47 @@ function isOverdue(task) {
 }
 
 function priorityText(priority) {
-  return { low: "低", medium: "中", high: "高" }[priority] || "中";
+  return isEnglish()
+    ? ({ low: "Low", medium: "Medium", high: "High" }[priority] || "Medium")
+    : ({ low: "低", medium: "中", high: "高" }[priority] || "中");
 }
 
 function statusText(status) {
-  return { todo: "待辦", doing: "進行中", done: "已完成", deferred: "延後" }[status] || "待辦";
+  return isEnglish()
+    ? ({ todo: "To do", doing: "Doing", done: "Done", deferred: "Deferred" }[status] || "To do")
+    : ({ todo: "待辦", doing: "進行中", done: "已完成", deferred: "延後" }[status] || "待辦");
 }
 
 function categoryText(category) {
-  return {
-    school: "學校",
-    research: "研究",
-    work: "工作",
-    project: "專案",
-    personal: "個人",
-    study: "學習"
-  }[category] || "未分類";
+  const labels = isEnglish()
+    ? {
+        school: "School",
+        research: "Research",
+        work: "Work",
+        project: "Project",
+        personal: "Personal",
+        study: "Study"
+      }
+    : {
+        school: "學校",
+        research: "研究",
+        work: "工作",
+        project: "專案",
+        personal: "個人",
+        study: "學習"
+      };
+  return labels[category] || ui("未分類", "Uncategorized");
 }
 
 function energyText(energy) {
-  return { low: "低能量", medium: "中能量", high: "高能量" }[energy] || "中能量";
+  return isEnglish()
+    ? ({ low: "Low energy", medium: "Medium energy", high: "High energy" }[energy] || "Medium energy")
+    : ({ low: "低能量", medium: "中能量", high: "高能量" }[energy] || "中能量");
 }
 
 function taskTypeText(type) {
-  return type === "shallow" ? "Shallow" : "Deep";
+  if (isEnglish()) return type === "shallow" ? "Shallow" : "Deep";
+  return type === "shallow" ? "淺層" : "深度";
 }
 
 function showToast(message) {
@@ -354,7 +459,269 @@ function showToast(message) {
 
 function setSyncStatus(message) {
   const label = $("syncStatusLabel");
-  if (label) label.textContent = message;
+  syncStatusState = message;
+  if (label) label.textContent = syncStatusText(message);
+}
+
+function setText(selector, text) {
+  const element = document.querySelector(selector);
+  if (element) element.textContent = text;
+}
+
+function setPlaceholder(id, text) {
+  const element = $(id);
+  if (element) element.placeholder = text;
+}
+
+function setLabelNodeText(label, text) {
+  if (!label) return;
+  const textNode = Array.from(label.childNodes).find((node) => node.nodeType === Node.TEXT_NODE && node.textContent.trim());
+  if (textNode) {
+    textNode.textContent = `${text} `;
+  } else {
+    label.insertBefore(document.createTextNode(`${text} `), label.firstChild);
+  }
+}
+
+function setControlLabel(controlId, text) {
+  setLabelNodeText($(controlId)?.closest("label"), text);
+}
+
+function setOptionLabels(selectId, labels) {
+  const select = $(selectId);
+  if (!select) return;
+  Object.entries(labels).forEach(([value, label]) => {
+    const option = Array.from(select.options).find((item) => item.value === value);
+    if (option) option.textContent = label;
+  });
+}
+
+function applySelectTranslations() {
+  setOptionLabels("taskFilter", {
+    all: ui("全部", "All"),
+    today: ui("今日", "Today"),
+    todo: statusText("todo"),
+    doing: statusText("doing"),
+    done: statusText("done"),
+    deferred: statusText("deferred"),
+    overdue: ui("已逾期", "Overdue"),
+    deep: ui("深度工作", "Deep Work"),
+    shallow: ui("淺層工作", "Shallow Work")
+  });
+  setOptionLabels("taskStatus", {
+    todo: statusText("todo"),
+    doing: statusText("doing"),
+    done: statusText("done"),
+    deferred: statusText("deferred")
+  });
+  setOptionLabels("taskPriority", {
+    low: priorityText("low"),
+    medium: priorityText("medium"),
+    high: priorityText("high")
+  });
+  setOptionLabels("taskCategory", {
+    "": categoryText(""),
+    school: categoryText("school"),
+    research: categoryText("research"),
+    work: categoryText("work"),
+    project: categoryText("project"),
+    personal: categoryText("personal"),
+    study: categoryText("study")
+  });
+  setOptionLabels("taskEnergy", {
+    low: priorityText("low"),
+    medium: priorityText("medium"),
+    high: priorityText("high")
+  });
+  setOptionLabels("taskType", {
+    deep: taskTypeText("deep"),
+    shallow: taskTypeText("shallow")
+  });
+  setOptionLabels("languageSelect", {
+    [LANGUAGE_ZH]: ui("繁體中文", "Traditional Chinese"),
+    [LANGUAGE_EN]: ui("英文", "English")
+  });
+  const languageSelect = $("languageSelect");
+  if (languageSelect) languageSelect.value = getAppLanguage();
+}
+
+function applyLanguage() {
+  document.documentElement.lang = getAppLanguage();
+  document.title = ui("Focus OS V2 | 個人學習管理器", "Focus OS V2 | Personal Learning Manager");
+  document.querySelector(".sidebar")?.setAttribute("aria-label", ui("主要導覽", "Main navigation"));
+
+  setText(".brand-block .eyebrow", ui("個人學習管理器", "Personal Learning Manager"));
+  PAGE_ORDER.forEach((page) => setText(`.nav-link[data-page="${page}"]`, pageLabel(page)));
+  setText("#headerSettingsBtn", pageLabel("settings"));
+  setSyncStatus(syncStatusState);
+  updatePageHeader();
+
+  setText(".metric-grid .metric-card:nth-child(1) span", ui("今日任務", "Today's tasks"));
+  setText(".metric-grid .metric-card:nth-child(2) span", ui("今日專注", "Focus today"));
+  setText(".metric-grid .metric-card:nth-child(3) span", ui("本週完成", "Done this week"));
+  setText(".metric-grid .metric-card:nth-child(4) span", ui("平均品質", "Average quality"));
+  setText(".metric-grid .metric-card:nth-child(5) span", ui("今日分心", "Distractions today"));
+
+  setText("#page-dashboard .focus-summary-panel .eyebrow", ui("下一個焦點", "Next Focus"));
+  setText("#page-dashboard .focus-summary-panel h3", ui("目前焦點任務", "Current Focus Task"));
+  setText("#selectTopTaskBtn", ui("智慧挑選", "Smart pick"));
+  setText("#page-dashboard .reflection-panel .eyebrow", ui("回顧", "Review"));
+  setText("#page-dashboard .reflection-panel h3", ui("今日回顧", "Daily Review"));
+  setText("#saveReflectionBtn", ui("儲存", "Save"));
+  setPlaceholder("dailyReflectionInput", ui("今天完成了什麼？哪裡卡住？明天要讓哪件事更順？", "What did you finish today? What got stuck? What should go smoother tomorrow?"));
+
+  setText(".charts-grid .chart-card:nth-child(1) h3", ui("最近 7 天專注分鐘", "Focus Minutes, Last 7 Days"));
+  setText(".charts-grid .chart-card:nth-child(2) h3", ui("最近 7 天完成任務", "Completed Tasks, Last 7 Days"));
+  setText(".charts-grid .chart-card:nth-child(3) h3", ui("任務分類時間", "Time by Task Category"));
+  setText(".charts-grid .chart-card:nth-child(4) h3", ui("預估時間與實際時間", "Estimated vs Actual Time"));
+  setText(".charts-grid .chart-card:nth-child(5) h3", ui("每日分心次數", "Daily Distractions"));
+  setText(".charts-grid .chart-card:nth-child(6) h3", ui("專注品質平均分數", "Average Focus Quality"));
+  setText(".charts-grid .chart-card:nth-child(7) h3", ui("學習科目進度", "Learning Subject Progress"));
+  setText(".charts-grid .chart-card:nth-child(8) h3", ui("學習熱度圖", "Learning Heatmap"));
+  $("learningHeatmapDashboard")?.setAttribute("aria-label", ui("最近學習熱度", "Recent learning heat"));
+  $("learningHeatmapLearning")?.setAttribute("aria-label", ui("學習熱度圖", "Learning heatmap"));
+
+  setText("#page-focus .deep-focus-panel > .section-head .eyebrow", ui("深度專注模式", "Deep Focus Mode"));
+  setText("#page-focus .deep-focus-panel > .section-head h3", ui("目前焦點任務", "Current Focus Task"));
+  setText("#startTimerBtn", ui("開始", "Start"));
+  setText("#pauseTimerBtn", ui("暫停", "Pause"));
+  setText("#resetTimerBtn", ui("重設", "Reset"));
+  setText("#endFocusBtn", ui("結束專注", "End focus"));
+  setControlLabel("distractionInput", ui("分心紀錄", "Distraction log"));
+  setPlaceholder("distractionInput", ui("專注中想到雜念時輸入，按 Enter 儲存", "Type a distraction during focus, then press Enter to save"));
+  setText("#focusFeedbackPanel .eyebrow", ui("專注回饋", "Session Feedback"));
+  setText("#focusFeedbackPanel h3", ui("這次專注的回饋", "Focus Session Feedback"));
+  setControlLabel("focusScoreInput", ui("專注分數：1 到 5", "Focus score: 1 to 5"));
+  setControlLabel("focusSummaryInput", ui("摘要：這次完成了什麼", "Summary: what did this session complete"));
+  setPlaceholder("focusSummaryInput", ui("簡短記錄成果，讓未來的效率分析更有上下文。", "Briefly record the result so future productivity analysis has context."));
+  setText("#saveFocusFeedbackBtn", ui("儲存專注紀錄", "Save focus record"));
+
+  setText("#page-tasks .split-layout > .panel:nth-child(1) .eyebrow", ui("任務板", "Task Board"));
+  setText("#page-tasks .split-layout > .panel:nth-child(1) h3", ui("任務清單", "Task List"));
+  setText("#smartSortBtn", ui("智慧排序", "Smart sort"));
+  setText("#page-tasks .split-layout > .panel:nth-child(2) .eyebrow", ui("規劃", "Plan"));
+  setText("#page-tasks .split-layout > .panel:nth-child(2) h3", ui("新增 / 編輯任務", "Add / Edit Task"));
+  setText("#clearFormBtn", ui("清空", "Clear"));
+  setControlLabel("taskTitle", ui("標題", "Title"));
+  setControlLabel("taskDescription", ui("描述", "Description"));
+  setControlLabel("taskDueDate", ui("期限", "Due date"));
+  setControlLabel("taskStatus", ui("狀態", "Status"));
+  setControlLabel("taskPriority", ui("優先級", "Priority"));
+  setControlLabel("taskCategory", ui("分類", "Category"));
+  setControlLabel("taskEnergy", ui("能量需求", "Energy required"));
+  setControlLabel("taskType", ui("任務類型", "Task type"));
+  setControlLabel("taskTags", ui("標籤", "Tags"));
+  setControlLabel("taskEstimate", ui("預估分鐘", "Estimated minutes"));
+  setPlaceholder("taskTags", ui("用逗號分隔，例如：報告, 考試, 專案", "Separate with commas, for example: report, exam, project"));
+  setText("#taskForm button[type='submit']", ui("儲存任務", "Save task"));
+
+  setText("#page-learning .learning-layout > .panel:nth-child(1) .eyebrow", ui("進度", "Progress"));
+  setText("#page-learning .learning-layout > .panel:nth-child(1) h3", ui("學習總進度", "Learning Progress"));
+  setText("#page-learning .learning-layout > .panel:nth-child(2) .eyebrow", ui("科目", "Subject"));
+  setText("#page-learning .learning-layout > .panel:nth-child(2) h3", ui("新增學習科目", "Add Learning Subject"));
+  setControlLabel("subjectNameInput", ui("科目 / 主題", "Subject / Topic"));
+  setControlLabel("subjectTargetInput", ui("目標分鐘", "Target minutes"));
+  setControlLabel("subjectUnitInput", ui("目前單元", "Current unit"));
+  setControlLabel("subjectReviewInput", ui("下次複習", "Next review"));
+  setControlLabel("subjectIntervalInput", ui("間隔天數", "Interval days"));
+  setControlLabel("subjectEaseInput", ui("記憶係數", "Ease factor"));
+  setControlLabel("subjectNoteInput", ui("備註", "Notes"));
+  setPlaceholder("subjectUnitInput", ui("例如：事件監聽、第三章", "Example: DOM events, Chapter 3"));
+  setText("#learningForm button[type='submit']", ui("新增學習計畫", "Add learning plan"));
+  setText("#page-learning > .panel .eyebrow", ui("複習佇列", "Review Queue"));
+  setText("#page-learning > .panel h3", ui("科目清單", "Subject List"));
+
+  setText("#page-ai .ai-layout > .panel:nth-child(1) .eyebrow", ui("動作", "Actions"));
+  setText("#page-ai .ai-layout > .panel:nth-child(1) h3", ui("AI 輔助入口", "AI Actions"));
+  setText(".ai-action[data-ai-action='plan-day']", ui("幫我安排今天", "Plan my day"));
+  setText(".ai-action[data-ai-action='suggest-task']", ui("幫我挑下一個任務", "Suggest my next task"));
+  setText(".ai-action[data-ai-action='breakdown-task']", ui("幫我拆解目前任務", "Break down current task"));
+  setText(".ai-action[data-ai-action='analyze']", ui("分析我的效率", "Analyze my productivity"));
+  setText("#page-ai .ai-result-panel .eyebrow", ui("結果", "Result"));
+  setText("#page-ai .ai-result-panel h3", ui("AI 回應", "AI Response"));
+  setText("#page-ai .ai-log-panel .eyebrow", ui("紀錄", "Logs"));
+  setText("#page-ai .ai-log-panel h3", ui("AI 紀錄", "AI Logs"));
+  if (lastAIResult) renderAIResult(lastAIResult);
+  else {
+    setText("#aiResultSource", ui("模擬就緒", "Mock ready"));
+    const aiResult = $("aiResult");
+    if (aiResult?.classList.contains("empty-state")) {
+      aiResult.textContent = ui("選擇一個 AI 動作後，結果會顯示在這裡。", "Choose an AI action and the result will appear here.");
+    }
+  }
+
+  setText("#page-settings .account-settings-panel .eyebrow", ui("帳號", "Account"));
+  setText("#page-settings .account-settings-panel h3", ui("帳號資訊", "Account Info"));
+  setText("#settingsEmailLabel", ui("電子郵件", "Email"));
+  setText("#settingsNameLabel", ui("名稱", "Name"));
+  setText("#changeNameBtn", ui("變更名稱", "Change name"));
+  setControlLabel("newPasswordInput", ui("新密碼", "New password"));
+  setPlaceholder("newPasswordInput", ui("至少 8 個字元", "At least 8 characters"));
+  setText("#changePasswordBtn", ui("變更密碼", "Change password"));
+  setText("#deleteAccountBtn", ui("刪除帳號", "Delete account"));
+  setText("#page-settings .timer-settings-panel .eyebrow", ui("計時器", "Timer"));
+  setText("#page-settings .timer-settings-panel h3", ui("專注設定", "Focus Settings"));
+  setControlLabel("focusMinutesInput", ui("專注分鐘", "Focus minutes"));
+  setControlLabel("breakMinutesInput", ui("休息分鐘", "Break minutes"));
+  setText("#saveSettingsBtn", ui("儲存設定", "Save settings"));
+  setText("#page-settings .backup-settings-panel .eyebrow", ui("備份", "Backup"));
+  setText("#page-settings .backup-settings-panel h3", ui("JSON 匯入 / 匯出", "JSON Import / Export"));
+  setText("#exportJsonBtn", ui("匯出 JSON", "Export JSON"));
+  setLabelNodeText(document.querySelector(".file-button"), ui("匯入 JSON", "Import JSON"));
+  setText("#apiBasePrefix", ui("目前 API：", "Current API: "));
+  setText("#page-settings .preference-settings-panel .eyebrow", ui("偏好", "Preferences"));
+  setText("#page-settings .preference-settings-panel h3", ui("語言與快捷鍵", "Language and Shortcuts"));
+  setControlLabel("languageSelect", ui("語言", "Language"));
+  document.querySelector(".shortcut-list")?.setAttribute("aria-label", ui("快捷鍵列表", "Shortcut list"));
+  setText("#shortcutNextLabel", ui("切換到下一個左側分頁", "Switch to the next left tab"));
+  setText("#shortcutPrevLabel", ui("切換到上一個左側分頁", "Switch to the previous left tab"));
+  setText("#shortcutSettingsLabel", ui("直接切換到設定", "Jump directly to Settings"));
+
+  setControlLabel("authNameInput", ui("名稱", "Name"));
+  setControlLabel("authEmailInput", ui("電子郵件", "Email"));
+  setControlLabel("authPasswordInput", ui("密碼", "Password"));
+  $("authCancelBtn")?.setAttribute("aria-label", ui("關閉", "Close"));
+
+  applySelectTranslations();
+  updateAuthUI();
+  updateTimerDisplay();
+}
+
+function handleLanguageChange(event) {
+  appData.settings.language = event.target.value === LANGUAGE_EN ? LANGUAGE_EN : LANGUAGE_ZH;
+  saveData();
+  applyLanguage();
+  renderAll();
+  showToast(ui("已切換為中文介面", "Switched to English interface"));
+}
+
+function focusActiveNavButton() {
+  document.querySelector(`.nav-link[data-page="${currentPage}"]`)?.focus({ preventScroll: true });
+}
+
+function switchPageByOffset(offset) {
+  const currentIndex = PAGE_ORDER.indexOf(currentPage);
+  const nextIndex = (currentIndex + offset + PAGE_ORDER.length) % PAGE_ORDER.length;
+  setPage(PAGE_ORDER[nextIndex]);
+  focusActiveNavButton();
+}
+
+function handleKeyboardShortcuts(event) {
+  if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.isComposing) return;
+
+  if (event.key === "Tab") {
+    if (!$("authModal")?.classList.contains("hidden")) return;
+    event.preventDefault();
+    switchPageByOffset(event.shiftKey ? -1 : 1);
+    return;
+  }
+
+  if (event.key === "Escape") {
+    event.preventDefault();
+    $("authModal")?.classList.add("hidden");
+    setPage("settings");
+    focusActiveNavButton();
+  }
 }
 
 async function apiRequest(path, options = {}) {
@@ -397,13 +764,13 @@ function saveData() {
     scheduleSaveDataToServer();
   } else {
     localStorage.setItem(LS_GUEST_KEY, JSON.stringify(appData));
-    setSyncStatus("Guest local");
+    setSyncStatus("guestLocal");
   }
 }
 
 function scheduleSaveDataToServer() {
   if (!authState.token) return;
-  setSyncStatus("Syncing...");
+  setSyncStatus("syncing");
   if (saveDataDebounceTimer) clearTimeout(saveDataDebounceTimer);
   saveDataDebounceTimer = setTimeout(async () => {
     try {
@@ -412,10 +779,10 @@ function scheduleSaveDataToServer() {
         headers: { Authorization: `Bearer ${authState.token}` },
         body: JSON.stringify(appData)
       });
-      setSyncStatus("Synced");
+      setSyncStatus("synced");
     } catch (err) {
-      setSyncStatus("Sync failed");
-      showToast(`同步失敗：${err.message}`);
+      setSyncStatus("syncFailed");
+      showToast(ui(`同步失敗：${err.message}`, `Sync failed: ${err.message}`));
     }
   }, 700);
 }
@@ -427,7 +794,7 @@ async function loadUserDataFromServer() {
   });
   appData = normalizeAppData(data);
   localStorage.setItem(LS_USER_CACHE_KEY, JSON.stringify(appData));
-  setSyncStatus("Synced");
+  setSyncStatus("synced");
 }
 
 function mergeArrayById(base, incoming) {
@@ -473,12 +840,15 @@ function setPage(page) {
     btn.classList.toggle("active", btn.dataset.page === currentPage);
   });
 
-  const activePage = $(`page-${currentPage}`);
-  const fallback = PAGE_DEFAULTS[currentPage];
-  $("pageTitle").textContent = activePage?.dataset.pageTitle || fallback.title;
-  $("pageEyebrow").textContent = activePage?.dataset.pageEyebrow || fallback.eyebrow;
-  $("pageSubtitle").textContent = activePage?.dataset.pageSubtitle || fallback.subtitle;
+  updatePageHeader();
   renderAll();
+}
+
+function updatePageHeader() {
+  const copy = getPageCopy(currentPage);
+  $("pageTitle").textContent = copy.title;
+  $("pageEyebrow").textContent = copy.eyebrow;
+  $("pageSubtitle").textContent = copy.subtitle;
 }
 
 function getCurrentTask() {
@@ -507,7 +877,7 @@ function renderTaskList() {
 
   const tasks = getFilteredTasks();
   if (!tasks.length) {
-    list.innerHTML = `<li class="empty-state">目前沒有符合條件的任務。</li>`;
+    list.innerHTML = `<li class="empty-state">${ui("目前沒有符合條件的任務。", "No tasks match the current filter.")}</li>`;
     initSortable();
     return;
   }
@@ -528,30 +898,30 @@ function renderTaskList() {
           <input type="checkbox" ${task.status === "done" ? "checked" : ""} />
           <span class="task-title">${escapeHtml(task.title)}</span>
         </label>
-        <span class="status-pill">Score ${task.score}</span>
+        <span class="status-pill">${ui("分數", "Score")} ${task.score}</span>
       </div>
-      <p class="task-description">${escapeHtml(task.description || "沒有描述")}</p>
+      <p class="task-description">${escapeHtml(task.description || ui("沒有描述", "No description"))}</p>
       <div class="task-meta">
-        <span>${task.dueDate || "無期限"}</span>
+        <span>${task.dueDate || ui("無期限", "No due date")}</span>
         <span>${statusText(task.status)}</span>
         <span>${categoryText(task.category)}</span>
-        <span>${task.actualMinutes} / ${task.estimateMinutes} 分</span>
-        <span>${subDone} / ${task.subtasks.length} 子任務</span>
+        <span>${task.actualMinutes} / ${task.estimateMinutes} ${ui("分", "min")}</span>
+        <span>${subDone} / ${task.subtasks.length} ${ui("子任務", "subtasks")}</span>
       </div>
       <div class="tag-row">
-        <span class="badge ${task.priority}">${priorityText(task.priority)}優先</span>
+        <span class="badge ${task.priority}">${isEnglish() ? `${priorityText(task.priority)} priority` : `${priorityText(task.priority)}優先`}</span>
         <span class="badge ${task.energyRequired}">${energyText(task.energyRequired)}</span>
         <span class="badge ${task.taskType}">${taskTypeText(task.taskType)}</span>
-        ${isOverdue(task) ? `<span class="badge high">已逾期</span>` : ""}
+        ${isOverdue(task) ? `<span class="badge high">${ui("已逾期", "Overdue")}</span>` : ""}
         ${tagHtml}
       </div>
       <div class="subtask-container"></div>
-      <input class="subtask-input" placeholder="+ 新增子任務，按 Enter" />
+      <input class="subtask-input" placeholder="${ui("+ 新增子任務，按 Enter", "+ Add subtask, press Enter")}" />
       <div class="task-actions">
-        <button class="small edit-btn secondary" type="button">編輯</button>
-        <button class="small focus-btn" type="button">設為焦點</button>
-        <button class="small done-btn secondary" type="button">${task.status === "done" ? "重開" : "完成"}</button>
-        <button class="small danger delete-btn" type="button">刪除</button>
+        <button class="small edit-btn secondary" type="button">${ui("編輯", "Edit")}</button>
+        <button class="small focus-btn" type="button">${ui("設為焦點", "Set focus")}</button>
+        <button class="small done-btn secondary" type="button">${task.status === "done" ? ui("重開", "Reopen") : ui("完成", "Complete")}</button>
+        <button class="small danger delete-btn" type="button">${ui("刪除", "Delete")}</button>
       </div>
     `;
 
@@ -634,12 +1004,12 @@ function setFocusTask(taskId, goToFocus = false) {
   saveData();
   if (goToFocus) setPage("focus");
   else renderAll();
-  showToast(`已設定焦點任務：${task.title}`);
+  showToast(ui(`已設定焦點任務：${task.title}`, `Focus task set: ${task.title}`));
 }
 
 function deleteTask(taskId) {
   const task = appData.tasks.find((item) => item.id === taskId);
-  if (!task || !confirm(`確定要刪除「${task.title}」？`)) return;
+  if (!task || !confirm(ui(`確定要刪除「${task.title}」？`, `Delete "${task.title}"?`))) return;
   appData.tasks = appData.tasks.filter((item) => item.id !== taskId);
   if (currentTaskIdForPomodoro === taskId) {
     currentTaskIdForPomodoro = null;
@@ -706,10 +1076,10 @@ function handleTaskSubmit(event) {
       });
       task.score = calculateTaskScore(task);
     }
-    showToast("任務已更新");
+    showToast(ui("任務已更新", "Task updated"));
   } else {
     appData.tasks.push(normalizeTask({ ...payload, id: createId("t"), createdAt: new Date().toISOString() }));
-    showToast("任務已新增");
+    showToast(ui("任務已新增", "Task added"));
   }
 
   saveData();
@@ -728,7 +1098,7 @@ function pickTopTask(goToFocus = true) {
     });
 
   if (!candidates.length) {
-    showToast("目前沒有可安排的任務");
+    showToast(ui("目前沒有可安排的任務", "There are no tasks to schedule right now"));
     return null;
   }
 
@@ -743,25 +1113,25 @@ function smartSortTasks() {
   appData.tasks.sort((a, b) => b.score - a.score);
   saveData();
   renderAll();
-  showToast("已依任務分數由高到低排序");
+  showToast(ui("已依任務分數由高到低排序", "Tasks sorted by score from high to low"));
 }
 
 function buildFocusTaskHtml(task) {
-  if (!task) return `<p>尚未指定焦點任務。</p>`;
+  if (!task) return `<p>${ui("尚未指定焦點任務。", "No focus task selected yet.")}</p>`;
   return `
     <div class="tag-row">
       <span class="status-pill">${statusText(task.status)}</span>
-      <span class="badge ${task.priority}">${priorityText(task.priority)}優先</span>
+      <span class="badge ${task.priority}">${isEnglish() ? `${priorityText(task.priority)} priority` : `${priorityText(task.priority)}優先`}</span>
       <span class="badge ${task.taskType}">${taskTypeText(task.taskType)}</span>
-      ${isOverdue(task) ? `<span class="status-pill danger-soft">已逾期</span>` : ""}
+      ${isOverdue(task) ? `<span class="status-pill danger-soft">${ui("已逾期", "Overdue")}</span>` : ""}
     </div>
     <h4>${escapeHtml(task.title)}</h4>
-    <p>${escapeHtml(task.description || "沒有描述")}</p>
+    <p>${escapeHtml(task.description || ui("沒有描述", "No description"))}</p>
     <div class="task-meta">
-      <span>${task.dueDate || "無期限"}</span>
+      <span>${task.dueDate || ui("無期限", "No due date")}</span>
       <span>${categoryText(task.category)}</span>
-      <span>${task.actualMinutes} / ${task.estimateMinutes} 分</span>
-      <span>Score ${calculateTaskScore(task)}</span>
+      <span>${task.actualMinutes} / ${task.estimateMinutes} ${ui("分", "min")}</span>
+      <span>${ui("分數", "Score")} ${calculateTaskScore(task)}</span>
     </div>
   `;
 }
@@ -780,7 +1150,7 @@ function renderFocusCards() {
 function updateCurrentTaskLabel() {
   const task = getCurrentTask();
   const label = $("currentTaskLabel");
-  if (label) label.textContent = task ? `現在專注：${task.title}` : "尚未選擇焦點任務";
+  if (label) label.textContent = task ? ui(`現在專注：${task.title}`, `Now focusing: ${task.title}`) : ui("尚未選擇焦點任務", "No focus task selected");
 }
 
 function updateTimerDisplay() {
@@ -789,7 +1159,7 @@ function updateTimerDisplay() {
   const timerValue = $("timerValue");
   const modeLabel = $("timerModeLabel");
   if (timerValue) timerValue.textContent = `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
-  if (modeLabel) modeLabel.textContent = timerState.running ? "Focusing" : "Focus";
+  if (modeLabel) modeLabel.textContent = timerState.running ? ui("專注中", "Focusing") : ui("專注", "Focus");
 }
 
 function applySettingsToTimer() {
@@ -836,7 +1206,7 @@ function startTimer() {
   timerState.pendingSession = null;
 
   if (!createActiveFocusSession()) {
-    showToast("請先選擇焦點任務");
+    showToast(ui("請先選擇焦點任務", "Choose a focus task first"));
     return;
   }
 
@@ -879,7 +1249,7 @@ function endFocusSession(autoCompleted = false) {
   pauseTimer();
   const task = getCurrentTask();
   if (!task) {
-    showToast("沒有焦點任務可結束");
+    showToast(ui("沒有焦點任務可結束", "There is no focus task to end"));
     return;
   }
 
@@ -912,7 +1282,10 @@ function endFocusSession(autoCompleted = false) {
   const score = $("focusScoreInput");
   const summary = $("focusSummaryInput");
   if (panel) panel.classList.remove("hidden");
-  if (meta) meta.textContent = `${durationMinutes} 分鐘 · 分心 ${sessionDistractions.length} 次`;
+  if (meta) meta.textContent = ui(
+    `${durationMinutes} 分鐘 · 分心 ${sessionDistractions.length} 次`,
+    `${durationMinutes} min · ${sessionDistractions.length} distractions`
+  );
   if (score) score.value = autoCompleted ? "5" : "4";
   if (summary) summary.value = "";
   renderFocusPage();
@@ -956,7 +1329,7 @@ function saveFocusFeedback(event) {
   $("focusFeedbackPanel").classList.add("hidden");
   saveData();
   renderAll();
-  showToast("專注紀錄已儲存");
+  showToast(ui("專注紀錄已儲存", "Focus record saved"));
 }
 
 function updateDailyStatsForFocus(session) {
@@ -983,7 +1356,7 @@ function recordDistraction(event) {
   const content = input.value.trim();
   if (!content) return;
   if (!timerState.running || !timerState.activeSession) {
-    showToast("請先開始專注，再記錄分心");
+    showToast(ui("請先開始專注，再記錄分心", "Start focusing before logging distractions"));
     return;
   }
 
@@ -1009,18 +1382,21 @@ function renderFocusPage() {
   if (!countLabel) return;
   const sessionId = timerState.activeSession?.id || timerState.pendingSession?.id;
   const count = sessionId ? appData.distractions.filter((item) => item.sessionId === sessionId).length : 0;
-  countLabel.textContent = `本次分心 ${count} 次`;
+  countLabel.textContent = ui(`本次分心 ${count} 次`, `${count} distractions this session`);
 }
 
 function savePomodoroSettings() {
   const focus = Number($("focusMinutesInput").value);
   const breakMinutes = Number($("breakMinutesInput").value);
-  if (focus < 1 || breakMinutes < 1) return alert("時間設定必須大於 0");
+  if (focus < 1 || breakMinutes < 1) return alert(ui("時間設定必須大於 0", "Time settings must be greater than 0"));
   appData.settings.focusMinutes = Math.round(focus);
   appData.settings.breakMinutes = Math.round(breakMinutes);
+  const languageSelect = $("languageSelect");
+  if (languageSelect) appData.settings.language = languageSelect.value === LANGUAGE_EN ? LANGUAGE_EN : LANGUAGE_ZH;
   saveData();
   applySettingsToTimer();
-  showToast("專注設定已儲存");
+  applyLanguage();
+  showToast(ui("設定已儲存", "Settings saved"));
 }
 
 function getFocusMinutesOnDate(date) {
@@ -1066,11 +1442,11 @@ function getTodayStats() {
 function renderMetrics() {
   const { todayTasks, todayDone, focusMinutes, distractions, quality } = getTodayStats();
   $("metricTodayTasks").textContent = `${todayDone} / ${todayTasks.length}`;
-  $("metricFocusMinutes").textContent = `${focusMinutes} 分`;
+  $("metricFocusMinutes").textContent = `${focusMinutes} ${ui("分", "min")}`;
   const weekDone = appData.tasks.filter((task) => task.completedAt && getWeekDates().includes(task.completedAt.slice(0, 10))).length;
-  $("metricWeekDone").textContent = `${weekDone} 件`;
+  $("metricWeekDone").textContent = `${weekDone} ${ui("件", "done")}`;
   $("metricQuality").textContent = quality ? `${quality} / 5` : "-";
-  $("metricDistractions").textContent = `${distractions} 次`;
+  $("metricDistractions").textContent = `${distractions} ${ui("次", "times")}`;
 }
 
 function chartBaseOptions() {
@@ -1143,7 +1519,7 @@ function renderCharts() {
       type: "line",
       data: {
         labels,
-        datasets: [{ label: "專注分鐘", data: dates.map(getFocusMinutesOnDate), borderColor: "#63e6be", backgroundColor: "rgba(99,230,190,.18)", tension: .35, fill: true }]
+        datasets: [{ label: ui("專注分鐘", "Focus minutes"), data: dates.map(getFocusMinutesOnDate), borderColor: "#63e6be", backgroundColor: "rgba(99,230,190,.18)", tension: .35, fill: true }]
       },
       options: chartBaseOptions()
     });
@@ -1152,7 +1528,7 @@ function renderCharts() {
       type: "bar",
       data: {
         labels,
-        datasets: [{ label: "完成任務", data: dates.map(getCompletedTasksOnDate), backgroundColor: "#74c0fc" }]
+        datasets: [{ label: ui("完成任務", "Completed tasks"), data: dates.map(getCompletedTasksOnDate), backgroundColor: "#74c0fc" }]
       },
       options: chartBaseOptions()
     });
@@ -1161,7 +1537,7 @@ function renderCharts() {
     createChart("categoryTimeChart", {
       type: "pie",
       data: {
-        labels: categoryData.length ? categoryData.map(([label]) => label) : ["尚無資料"],
+        labels: categoryData.length ? categoryData.map(([label]) => label) : [ui("尚無資料", "No data")],
         datasets: [{ data: categoryData.length ? categoryData.map(([, minutes]) => minutes) : [1], backgroundColor: palette }]
       },
       options: pieOptions()
@@ -1174,10 +1550,10 @@ function renderCharts() {
     createChart("estimateActualChart", {
       type: "bar",
       data: {
-        labels: estimateTasks.length ? estimateTasks.map((task) => task.title.slice(0, 12)) : ["尚無資料"],
+        labels: estimateTasks.length ? estimateTasks.map((task) => task.title.slice(0, 12)) : [ui("尚無資料", "No data")],
         datasets: [
-          { label: "預估", data: estimateTasks.length ? estimateTasks.map((task) => task.estimateMinutes) : [0], backgroundColor: "#ffd166" },
-          { label: "實際", data: estimateTasks.length ? estimateTasks.map((task) => task.actualMinutes) : [0], backgroundColor: "#63e6be" }
+          { label: ui("預估", "Estimated"), data: estimateTasks.length ? estimateTasks.map((task) => task.estimateMinutes) : [0], backgroundColor: "#ffd166" },
+          { label: ui("實際", "Actual"), data: estimateTasks.length ? estimateTasks.map((task) => task.actualMinutes) : [0], backgroundColor: "#63e6be" }
         ]
       },
       options: chartBaseOptions()
@@ -1187,7 +1563,7 @@ function renderCharts() {
       type: "line",
       data: {
         labels,
-        datasets: [{ label: "分心次數", data: dates.map(getDistractionsOnDate), borderColor: "#ff8787", backgroundColor: "rgba(255,135,135,.16)", tension: .35, fill: true }]
+        datasets: [{ label: ui("分心次數", "Distractions"), data: dates.map(getDistractionsOnDate), borderColor: "#ff8787", backgroundColor: "rgba(255,135,135,.16)", tension: .35, fill: true }]
       },
       options: chartBaseOptions()
     });
@@ -1196,7 +1572,7 @@ function renderCharts() {
       type: "line",
       data: {
         labels,
-        datasets: [{ label: "平均分數", data: dates.map(getAverageFocusScoreOnDate), borderColor: "#b197fc", backgroundColor: "rgba(177,151,252,.14)", tension: .35, fill: true }]
+        datasets: [{ label: ui("平均分數", "Average score"), data: dates.map(getAverageFocusScoreOnDate), borderColor: "#b197fc", backgroundColor: "rgba(177,151,252,.14)", tension: .35, fill: true }]
       },
       options: { ...chartBaseOptions(), scales: { ...chartBaseOptions().scales, y: { ...chartBaseOptions().scales.y, suggestedMax: 5 } } }
     });
@@ -1205,8 +1581,8 @@ function renderCharts() {
     createChart("learningProgressChart", {
       type: "bar",
       data: {
-        labels: learningData.length ? learningData.map((item) => item.label) : ["尚無資料"],
-        datasets: [{ label: "進度 %", data: learningData.length ? learningData.map((item) => item.value) : [0], backgroundColor: "#20c997" }]
+        labels: learningData.length ? learningData.map((item) => item.label) : [ui("尚無資料", "No data")],
+        datasets: [{ label: ui("進度 %", "Progress %"), data: learningData.length ? learningData.map((item) => item.value) : [0], backgroundColor: "#20c997" }]
       },
       options: chartBaseOptions()
     });
@@ -1217,8 +1593,8 @@ function renderCharts() {
     createChart("learningSubjectChart", {
       type: "bar",
       data: {
-        labels: learningData.length ? learningData.map((item) => item.label) : ["尚無資料"],
-        datasets: [{ label: "進度 %", data: learningData.length ? learningData.map((item) => item.value) : [0], backgroundColor: "#63e6be" }]
+        labels: learningData.length ? learningData.map((item) => item.label) : [ui("尚無資料", "No data")],
+        datasets: [{ label: ui("進度 %", "Progress %"), data: learningData.length ? learningData.map((item) => item.value) : [0], backgroundColor: "#63e6be" }]
       },
       options: chartBaseOptions()
     });
@@ -1239,7 +1615,7 @@ function renderHeatmap(containerId) {
   container.innerHTML = dates.map((date) => {
     const value = getLearningHeatValue(date);
     const level = value >= 120 ? 4 : value >= 75 ? 3 : value >= 30 ? 2 : value > 0 ? 1 : 0;
-    return `<span class="heat-cell heat-${level}" title="${date} · ${value} 分"></span>`;
+    return `<span class="heat-cell heat-${level}" title="${date} · ${value} ${ui("分", "min")}"></span>`;
   }).join("");
 }
 
@@ -1262,7 +1638,7 @@ function renderLearning() {
   bar.style.width = `${percent}%`;
 
   if (!subjects.length) {
-    list.innerHTML = `<li class="empty-state">新增第一個學習科目後，這裡會顯示進度與複習排程。</li>`;
+    list.innerHTML = `<li class="empty-state">${ui("新增第一個學習科目後，這裡會顯示進度與複習排程。", "Add your first subject to see progress and review scheduling here.")}</li>`;
     return;
   }
 
@@ -1275,22 +1651,22 @@ function renderLearning() {
     item.innerHTML = `
       <div class="learning-head">
         <strong>${escapeHtml(subject.name)}</strong>
-        <span>${subject.studiedMinutes} / ${subject.targetMinutes} 分</span>
+        <span>${subject.studiedMinutes} / ${subject.targetMinutes} ${ui("分", "min")}</span>
       </div>
       <div class="progress-track small-track"><div class="progress-bar" style="width:${subjectPercent}%"></div></div>
-      <p class="note">${escapeHtml(subject.currentUnit || "尚未設定目前單元")}</p>
+      <p class="note">${escapeHtml(subject.currentUnit || ui("尚未設定目前單元", "No current unit set"))}</p>
       <div class="learning-meta">
-        <span>${reviewDue ? "今天需要複習" : `下次複習：${subject.nextReviewDate || "未設定"}`}</span>
-        <span>interval ${subject.interval}</span>
-        <span>ease ${subject.easeFactor.toFixed(1)}</span>
-        <span>複習 ${subject.reviewHistory.length} 次</span>
+        <span>${reviewDue ? ui("今天需要複習", "Review due today") : ui(`下次複習：${subject.nextReviewDate || "未設定"}`, `Next review: ${subject.nextReviewDate || "Not set"}`)}</span>
+        <span>${ui("間隔", "interval")} ${subject.interval}</span>
+        <span>${ui("記憶係數", "ease")} ${subject.easeFactor.toFixed(1)}</span>
+        <span>${ui(`複習 ${subject.reviewHistory.length} 次`, `${subject.reviewHistory.length} reviews`)}</span>
       </div>
       <p class="note">${escapeHtml(subject.note || "")}</p>
       <div class="learning-actions">
-        <button class="small add25" type="button">+25 分</button>
-        <button class="small secondary add5" type="button">+5 分</button>
-        <button class="small secondary review" type="button">完成複習</button>
-        <button class="small danger remove" type="button">刪除</button>
+        <button class="small add25" type="button">+25 ${ui("分", "min")}</button>
+        <button class="small secondary add5" type="button">+5 ${ui("分", "min")}</button>
+        <button class="small secondary review" type="button">${ui("完成複習", "Complete review")}</button>
+        <button class="small danger remove" type="button">${ui("刪除", "Delete")}</button>
       </div>
     `;
     item.querySelector(".add25").onclick = () => addStudyMinutes(subject.id, 25);
@@ -1325,7 +1701,7 @@ function addSubject(event) {
   $("subjectEaseInput").value = "2.5";
   saveData();
   renderAll();
-  showToast("學習科目已新增");
+  showToast(ui("學習科目已新增", "Subject added"));
 }
 
 function addStudyMinutes(subjectId, minutes) {
@@ -1364,12 +1740,12 @@ function completeReview(subjectId) {
   };
   saveData();
   renderAll();
-  showToast(`已排到 ${subject.nextReviewDate} 複習`);
+  showToast(ui(`已排到 ${subject.nextReviewDate} 複習`, `Next review scheduled for ${subject.nextReviewDate}`));
 }
 
 function removeSubject(subjectId) {
   const subject = appData.learningProgress.subjects.find((item) => item.id === subjectId);
-  if (!subject || !confirm(`確定要刪除「${subject.name}」？`)) return;
+  if (!subject || !confirm(ui(`確定要刪除「${subject.name}」？`, `Delete "${subject.name}"?`))) return;
   appData.learningProgress.subjects = appData.learningProgress.subjects.filter((item) => item.id !== subjectId);
   saveData();
   renderAll();
@@ -1383,7 +1759,7 @@ function saveReflection() {
     updatedAt: new Date().toISOString()
   };
   saveData();
-  showToast("今日回顧已儲存");
+  showToast(ui("今日回顧已儲存", "Daily review saved"));
 }
 
 function loadReflection() {
@@ -1410,9 +1786,9 @@ function importJson(file) {
       appData = normalizeAppData(JSON.parse(String(reader.result || "{}")));
       saveData();
       renderAll();
-      showToast("JSON 已匯入並完成資料正規化");
+      showToast(ui("JSON 已匯入並完成資料正規化", "JSON imported and normalized"));
     } catch (_) {
-      alert("JSON 格式無法解析，請確認檔案內容。");
+      alert(ui("JSON 格式無法解析，請確認檔案內容。", "Could not parse the JSON file. Please check its contents."));
     }
   };
   reader.readAsText(file);
@@ -1435,12 +1811,12 @@ async function requestAI(action, payload) {
     try {
       const result = await apiRequest(endpoint, {
         method: "POST",
-        body: JSON.stringify(payload)
+        body: JSON.stringify({ ...payload, language: getAppLanguage() })
       });
       return { ...result, source: "backend-mock" };
     } catch (err) {
       const local = mockAIResponse(action, payload);
-      return { ...local, source: "local-mock", notice: `後端 AI mock 暫時不可用，已改用前端 mock：${err.message}` };
+      return { ...local, source: "local-mock", notice: ui(`後端 AI 模擬暫時不可用，已改用前端模擬：${err.message}`, `Backend AI mock is unavailable, so the app used the local mock: ${err.message}`) };
     }
   }
   return { ...mockAIResponse(action, payload), source: "local-mock" };
@@ -1455,47 +1831,55 @@ function mockAIResponse(action, payload) {
 
   if (action === "plan-day") {
     const planItems = tasks.slice(0, 4).map((task, index) => {
-      const block = index === 0 ? "第一個深度專注區塊" : `第 ${index + 1} 個處理區塊`;
-      return `${block}：${task.title}（${task.estimateMinutes || 25} 分，Score ${task.score}）`;
+      const block = index === 0 ? ui("第一個深度專注區塊", "First deep focus block") : ui(`第 ${index + 1} 個處理區塊`, `Block ${index + 1}`);
+      return ui(`${block}：${task.title}（${task.estimateMinutes || 25} 分，分數 ${task.score}）`, `${block}: ${task.title} (${task.estimateMinutes || 25} min, score ${task.score})`);
     });
     return {
-      title: "今天的建議安排",
-      summary: planItems.length ? "先處理高分任務，再用低能量時段收尾淺層工作。" : "目前沒有待辦任務，可以安排學習或回顧。",
-      items: planItems.length ? planItems : ["新增一個今天最重要的任務", "完成 25 分鐘學習", "寫下今日回顧"],
+      title: ui("今天的建議安排", "Suggested Plan for Today"),
+      summary: planItems.length
+        ? ui("先處理高分任務，再用低能量時段收尾淺層工作。", "Start with high-score tasks, then use lower-energy time for shallow work.")
+        : ui("目前沒有待辦任務，可以安排學習或回顧。", "There are no open tasks right now, so you can schedule study or review time."),
+      items: planItems.length ? planItems : [
+        ui("新增一個今天最重要的任務", "Add today's most important task"),
+        ui("完成 25 分鐘學習", "Complete 25 minutes of study"),
+        ui("寫下今日回顧", "Write today's review")
+      ],
       taskId: tasks[0]?.id || null
     };
   }
 
   if (action === "suggest-task") {
     return {
-      title: "下一個任務建議",
-      summary: current ? `建議先做「${current.title}」，它目前的智慧分數最高。` : "目前沒有可建議的任務。",
+      title: ui("下一個任務建議", "Next Task Suggestion"),
+      summary: current
+        ? ui(`建議先做「${current.title}」，它目前的智慧分數最高。`, `Start with "${current.title}" because it currently has the highest smart score.`)
+        : ui("目前沒有可建議的任務。", "There are no tasks to suggest right now."),
       items: current ? [
-        `Score：${calculateTaskScore(current)}`,
-        `類型：${taskTypeText(current.taskType)}，能量：${energyText(current.energyRequired)}`,
-        `預估：${current.estimateMinutes || 25} 分`
-      ] : ["建立一個明確、可完成的下一步"],
+        ui(`分數：${calculateTaskScore(current)}`, `Score: ${calculateTaskScore(current)}`),
+        ui(`類型：${taskTypeText(current.taskType)}，能量：${energyText(current.energyRequired)}`, `Type: ${taskTypeText(current.taskType)}, energy: ${energyText(current.energyRequired)}`),
+        ui(`預估：${current.estimateMinutes || 25} 分`, `Estimate: ${current.estimateMinutes || 25} min`)
+      ] : [ui("建立一個明確、可完成的下一步", "Create one clear, completable next step")],
       taskId: current?.id || null
     };
   }
 
   if (action === "breakdown-task") {
-    const title = current?.title || "目前任務";
+    const title = current?.title || ui("目前任務", "Current task");
     return {
-      title: `拆解：${title}`,
-      summary: "先把任務拆成可以在 10 到 25 分鐘內完成的小步驟。",
+      title: ui(`拆解：${title}`, `Breakdown: ${title}`),
+      summary: ui("先把任務拆成可以在 10 到 25 分鐘內完成的小步驟。", "Break the task into small steps that can be finished in 10 to 25 minutes."),
       items: [
-        "定義完成標準",
-        "列出需要的資料或工具",
-        "完成最小可交付版本",
-        "檢查與修正",
-        "記錄下一步"
+        ui("定義完成標準", "Define the finish line"),
+        ui("列出需要的資料或工具", "List needed materials or tools"),
+        ui("完成最小可交付版本", "Complete the smallest deliverable version"),
+        ui("檢查與修正", "Review and fix"),
+        ui("記錄下一步", "Record the next step")
       ],
       subtasks: [
-        "定義完成標準",
-        "收集必要資料",
-        "完成第一版",
-        "檢查與修正"
+        ui("定義完成標準", "Define the finish line"),
+        ui("收集必要資料", "Collect necessary materials"),
+        ui("完成第一版", "Complete the first version"),
+        ui("檢查與修正", "Review and fix")
       ],
       taskId: current?.id || null
     };
@@ -1511,13 +1895,13 @@ function mockAIResponse(action, payload) {
     : 0;
 
   return {
-    title: "效率分析",
-    summary: "這是依據最近 7 天資料產生的 mock 分析。",
+    title: ui("效率分析", "Productivity Analysis"),
+    summary: ui("這是依據最近 7 天資料產生的模擬分析。", "This is a mock analysis based on the last 7 days of data."),
     items: [
-      `專注總分鐘：${focusMinutes}`,
-      `完成任務：${completed}`,
-      `分心紀錄：${distractions}`,
-      `平均專注品質：${avgQuality || "-"}`
+      ui(`專注總分鐘：${focusMinutes}`, `Total focus minutes: ${focusMinutes}`),
+      ui(`完成任務：${completed}`, `Completed tasks: ${completed}`),
+      ui(`分心紀錄：${distractions}`, `Distraction logs: ${distractions}`),
+      ui(`平均專注品質：${avgQuality || "-"}`, `Average focus quality: ${avgQuality || "-"}`)
     ]
   };
 }
@@ -1526,17 +1910,17 @@ function renderAIResult(result) {
   const container = $("aiResult");
   const source = $("aiResultSource");
   if (!container || !result) return;
-  source.textContent = result.source === "backend-mock" ? "Backend mock" : "Local mock";
+  source.textContent = result.source === "backend-mock" ? ui("後端模擬", "Backend mock") : ui("本機模擬", "Local mock");
   const items = Array.isArray(result.items) ? result.items : [];
   container.classList.remove("empty-state");
   container.innerHTML = `
-    <h4>${escapeHtml(result.title || "AI 回應")}</h4>
+    <h4>${escapeHtml(result.title || ui("AI 回應", "AI Response"))}</h4>
     <p>${escapeHtml(result.summary || "")}</p>
     ${result.notice ? `<p class="muted">${escapeHtml(result.notice)}</p>` : ""}
     ${items.length ? `<ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : ""}
     <div class="button-row">
-      ${result.taskId ? `<button id="aiSetFocusBtn" class="small" type="button">設為焦點任務</button>` : ""}
-      ${result.subtasks?.length && result.taskId ? `<button id="applyAiBreakdownBtn" class="small secondary" type="button">加入子任務</button>` : ""}
+      ${result.taskId ? `<button id="aiSetFocusBtn" class="small" type="button">${ui("設為焦點任務", "Set as focus task")}</button>` : ""}
+      ${result.subtasks?.length && result.taskId ? `<button id="applyAiBreakdownBtn" class="small secondary" type="button">${ui("加入子任務", "Add subtasks")}</button>` : ""}
     </div>
   `;
 
@@ -1555,13 +1939,13 @@ function applyAIBreakdown(result) {
   });
   saveData();
   renderAll();
-  showToast("AI 拆解已加入子任務");
+  showToast(ui("AI 拆解已加入子任務", "AI breakdown added to subtasks"));
 }
 
 async function handleAIAction(action) {
   const buttons = Array.from(document.querySelectorAll(".ai-action"));
   buttons.forEach((button) => { button.disabled = true; });
-  $("aiResult").textContent = "AI mock 正在整理資料...";
+  $("aiResult").textContent = ui("AI 模擬正在整理資料...", "AI mock is organizing the data...");
   try {
     const result = await requestAI(action, buildAIPayload());
     lastAIResult = { ...result, action };
@@ -1581,19 +1965,27 @@ async function handleAIAction(action) {
 }
 
 function actionText(action) {
-  return {
-    "plan-day": "安排今天",
-    "suggest-task": "挑下一個任務",
-    "breakdown-task": "拆解任務",
-    analyze: "效率分析"
-  }[action] || action;
+  const labels = isEnglish()
+    ? {
+        "plan-day": "Plan today",
+        "suggest-task": "Suggest next task",
+        "breakdown-task": "Break down task",
+        analyze: "Productivity analysis"
+      }
+    : {
+        "plan-day": "安排今天",
+        "suggest-task": "挑下一個任務",
+        "breakdown-task": "拆解任務",
+        analyze: "效率分析"
+      };
+  return labels[action] || action;
 }
 
 function renderAILogs() {
   const list = $("aiLogsList");
   if (!list) return;
   if (!appData.aiLogs.length) {
-    list.innerHTML = `<li class="empty-state">尚無 AI logs。</li>`;
+    list.innerHTML = `<li class="empty-state">${ui("尚無 AI 紀錄。", "No AI logs yet.")}</li>`;
     return;
   }
   list.innerHTML = appData.aiLogs.slice(0, 10).map((log) => `
@@ -1607,18 +1999,18 @@ function renderAILogs() {
 
 function updateAuthUI() {
   $("authStatusLabel").textContent = authState.mode === "user"
-    ? `${authState.user?.name || "使用者"} · 已登入`
-    : "Guest 模式";
-  $("authActionBtn").textContent = authState.mode === "user" ? "登出" : "登入 / 註冊";
+    ? ui(`${authState.user?.name || "使用者"} · 已登入`, `${authState.user?.name || "User"} · Signed in`)
+    : ui("訪客模式", "Guest mode");
+  $("authActionBtn").textContent = authState.mode === "user" ? ui("登出", "Sign out") : ui("登入 / 註冊", "Sign in / Register");
   renderSettingsUserInfo();
 }
 
 function openAuthModal(loginMode) {
   isLoginMode = loginMode;
   $("authModal").classList.remove("hidden");
-  $("authModalTitle").textContent = loginMode ? "登入" : "建立帳號";
-  $("authSubmitBtn").textContent = loginMode ? "登入" : "建立帳號";
-  $("authToggleBtn").textContent = loginMode ? "建立帳號" : "改用登入";
+  $("authModalTitle").textContent = loginMode ? ui("登入", "Sign in") : ui("建立帳號", "Create account");
+  $("authSubmitBtn").textContent = loginMode ? ui("登入", "Sign in") : ui("建立帳號", "Create account");
+  $("authToggleBtn").textContent = loginMode ? ui("建立帳號", "Create account") : ui("改用登入", "Use sign in");
   $("authNameGroup").style.display = loginMode ? "none" : "block";
   $("authPasswordInput").autocomplete = loginMode ? "current-password" : "new-password";
 }
@@ -1627,8 +2019,8 @@ async function handleAuthSubmit() {
   const email = $("authEmailInput").value.trim();
   const password = $("authPasswordInput").value;
   const name = $("authNameInput").value.trim();
-  if (!email || !password || (!isLoginMode && !name)) return alert("請完整填寫資料。");
-  if (password.length < 8) return alert("密碼至少需要 8 個字元。");
+  if (!email || !password || (!isLoginMode && !name)) return alert(ui("請完整填寫資料。", "Please complete all fields."));
+  if (password.length < 8) return alert(ui("密碼至少需要 8 個字元。", "Password must be at least 8 characters."));
 
   const endpoint = isLoginMode ? "/auth/login" : "/auth/register";
   const payload = isLoginMode ? { email, password } : { email, password, name };
@@ -1645,14 +2037,14 @@ async function handleAuthSubmit() {
     updateAuthUI();
     applySettingsToTimer();
     renderAll();
-    showToast("已登入並同步資料");
+    showToast(ui("已登入並同步資料", "Signed in and synced data"));
   } catch (err) {
-    alert(`登入或註冊失敗：${err.message}`);
+    alert(ui(`登入或註冊失敗：${err.message}`, `Sign in or registration failed: ${err.message}`));
   }
 }
 
 function logout() {
-  if (!confirm("確定要登出？登入資料會保留在伺服器，畫面會切回 Guest 資料。")) return;
+  if (!confirm(ui("確定要登出？登入資料會保留在伺服器，畫面會切回訪客資料。", "Sign out? Synced data will remain on the server and the app will switch back to guest data."))) return;
   authState = { mode: "guest", user: null, token: null };
   saveAuthState();
   appData = normalizeAppData(JSON.parse(localStorage.getItem(LS_GUEST_KEY) || "{}"));
@@ -1672,8 +2064,8 @@ function renderSettingsUserInfo() {
 }
 
 async function handleChangeName() {
-  if (authState.mode !== "user") return alert("請先登入。");
-  const name = prompt("請輸入新的名稱", authState.user?.name || "");
+  if (authState.mode !== "user") return alert(ui("請先登入。", "Please sign in first."));
+  const name = prompt(ui("請輸入新的名稱", "Enter a new name"), authState.user?.name || "");
   if (!name) return;
   try {
     const res = await apiRequest("/auth/update-name", {
@@ -1684,16 +2076,16 @@ async function handleChangeName() {
     authState.user = res.user;
     saveAuthState();
     updateAuthUI();
-    showToast("名稱已更新");
+    showToast(ui("名稱已更新", "Name updated"));
   } catch (err) {
-    alert(`更新失敗：${err.message}`);
+    alert(ui(`更新失敗：${err.message}`, `Update failed: ${err.message}`));
   }
 }
 
 async function handleChangePassword() {
-  if (authState.mode !== "user") return alert("請先登入。");
+  if (authState.mode !== "user") return alert(ui("請先登入。", "Please sign in first."));
   const password = $("newPasswordInput").value.trim();
-  if (password.length < 8) return alert("新密碼至少需要 8 個字元。");
+  if (password.length < 8) return alert(ui("新密碼至少需要 8 個字元。", "New password must be at least 8 characters."));
   try {
     await apiRequest("/auth/update-password", {
       method: "POST",
@@ -1701,15 +2093,15 @@ async function handleChangePassword() {
       body: JSON.stringify({ password })
     });
     $("newPasswordInput").value = "";
-    showToast("密碼已更新");
+    showToast(ui("密碼已更新", "Password updated"));
   } catch (err) {
-    alert(`更新失敗：${err.message}`);
+    alert(ui(`更新失敗：${err.message}`, `Update failed: ${err.message}`));
   }
 }
 
 async function handleDeleteAccount() {
-  if (authState.mode !== "user") return alert("請先登入。");
-  if (!confirm("確定要刪除帳號？伺服器上的帳號與資料會移除。")) return;
+  if (authState.mode !== "user") return alert(ui("請先登入。", "Please sign in first."));
+  if (!confirm(ui("確定要刪除帳號？伺服器上的帳號與資料會移除。", "Delete this account? The server account and data will be removed."))) return;
   try {
     await apiRequest("/auth/delete", {
       method: "DELETE",
@@ -1721,9 +2113,9 @@ async function handleDeleteAccount() {
     appData = normalizeAppData(JSON.parse(localStorage.getItem(LS_GUEST_KEY) || "{}"));
     updateAuthUI();
     renderAll();
-    showToast("帳號已刪除，已切回 Guest 模式");
+    showToast(ui("帳號已刪除，已切回訪客模式", "Account deleted. Switched back to guest mode."));
   } catch (err) {
-    alert(`刪除失敗：${err.message}`);
+    alert(ui(`刪除失敗：${err.message}`, `Delete failed: ${err.message}`));
   }
 }
 
@@ -1763,6 +2155,7 @@ function bindEvents() {
   $("focusFeedbackPanel").onsubmit = saveFocusFeedback;
   $("distractionInput").onkeydown = recordDistraction;
   $("saveSettingsBtn").onclick = savePomodoroSettings;
+  $("languageSelect").onchange = handleLanguageChange;
 
   $("learningForm").onsubmit = addSubject;
   $("exportJsonBtn").onclick = exportJson;
@@ -1780,6 +2173,8 @@ function bindEvents() {
   $("changeNameBtn").onclick = handleChangeName;
   $("changePasswordBtn").onclick = handleChangePassword;
   $("deleteAccountBtn").onclick = handleDeleteAccount;
+
+  document.addEventListener("keydown", handleKeyboardShortcuts);
 }
 
 async function init() {
@@ -1791,16 +2186,17 @@ async function init() {
       await loadUserDataFromServer();
     } else {
       appData = normalizeAppData(JSON.parse(localStorage.getItem(LS_GUEST_KEY) || "{}"));
-      setSyncStatus("Guest local");
+      setSyncStatus("guestLocal");
     }
   } catch (_) {
     appData = normalizeAppData(JSON.parse(localStorage.getItem(LS_USER_CACHE_KEY) || "{}"));
-    setSyncStatus("Offline cache");
+    setSyncStatus("offlineCache");
   }
 
   currentTaskIdForPomodoro = localStorage.getItem(LS_FOCUS_TASK_KEY)
     || appData.tasks.find((task) => task.status === "doing")?.id
     || null;
+  applyLanguage();
   updateAuthUI();
   applySettingsToTimer();
   setPage("dashboard");
