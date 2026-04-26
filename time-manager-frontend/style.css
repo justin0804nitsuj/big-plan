@@ -735,7 +735,7 @@ h3 {
 }
 
 .friend-invite-form,
-.message-form,
+.chat-form,
 .share-task-controls,
 .focus-room-controls {
   display: grid;
@@ -791,6 +791,25 @@ h3 {
   font-size: 12px;
 }
 
+.message-image {
+  display: block;
+  max-width: min(100%, 320px);
+  max-height: 260px;
+  border-radius: var(--radius);
+  object-fit: cover;
+}
+
+.message-image + p,
+.message-image + span {
+  margin-top: 8px;
+}
+
+.typing-indicator {
+  min-height: 22px;
+  margin-top: 8px;
+  font-size: 13px;
+}
+
 .quick-message-row {
   display: flex;
   flex-wrap: wrap;
@@ -806,6 +825,16 @@ h3 {
   color: var(--text);
   padding: 7px 10px;
   font-size: 13px;
+}
+
+.chat-form {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: end;
+}
+
+.status-pill.online {
+  background: rgba(99, 230, 190, .15);
+  color: #c3fae8;
 }
 
 .focus-room-card.empty-state {
@@ -1045,7 +1074,8 @@ h3 {
   .metric-grid,
   .charts-grid,
   .form-grid,
-  .form-grid.compact {
+  .form-grid.compact,
+  .chat-form {
     grid-template-columns: 1fr;
   }
 
@@ -1060,5 +1090,9 @@ h3 {
 
   .timer-value {
     font-size: 56px;
+  }
+
+  .message-bubble {
+    width: 100%;
   }
 }

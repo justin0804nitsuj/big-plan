@@ -357,20 +357,24 @@
           <section class="panel chat-panel">
             <div class="section-head">
               <div>
-                <p class="eyebrow">私訊聊天區</p>
-                <h3 id="chatFriendName">選擇好友開始聊天</h3>
+                <p class="eyebrow">Chat</p>
+                <h3 id="chatFriendName">請選擇好友</h3>
               </div>
+              <span id="chatPresenceLabel" class="status-pill">離線</span>
             </div>
             <div id="messageList" class="message-list"></div>
-            <div id="quickMessageRow" class="quick-message-row">
-              <button class="quick-message" data-message="我要開始專注 25 分鐘" type="button">我要開始專注 25 分鐘</button>
-              <button class="quick-message" data-message="一起讀書嗎？" type="button">一起讀書嗎？</button>
-              <button class="quick-message" data-message="我現在先處理任務" type="button">我現在先處理任務</button>
-              <button class="quick-message" data-message="休息一下" type="button">休息一下</button>
-              <button class="quick-message" data-message="等我 5 分鐘" type="button">等我 5 分鐘</button>
+            <div id="typingIndicator" class="typing-indicator muted hidden">對方正在輸入...</div>
+            <div class="quick-message-row">
+              <button class="quick-message" type="button">我要開始專注 25 分鐘</button>
+              <button class="quick-message" type="button">一起讀書嗎？</button>
+              <button class="quick-message" type="button">我現在先處理任務</button>
+              <button class="quick-message" type="button">休息一下</button>
+              <button class="quick-message" type="button">等我 5 分鐘</button>
             </div>
-            <form id="messageForm" class="message-form">
-              <input id="messageInput" type="text" placeholder="輸入訊息..." />
+            <form id="chatForm" class="chat-form">
+              <input id="chatInput" type="text" placeholder="輸入訊息..." />
+              <input id="chatImageInput" type="file" accept="image/jpeg,image/png,image/webp,image/gif" hidden />
+              <button id="openImagePickerBtn" class="secondary" type="button">圖片</button>
               <button type="submit">送出</button>
             </form>
           </section>
@@ -564,6 +568,7 @@
 
   <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   <script src="main.js"></script>
 </body>
 </html>

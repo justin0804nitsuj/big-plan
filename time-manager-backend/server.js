@@ -1,9 +1,12 @@
 const express = require("express");
+const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const cors = require("cors");
+const multer = require("multer");
+const { Server } = require("socket.io");
 require("dotenv").config();
 
 const app = express();
@@ -16,9 +19,12 @@ const MESSAGES_FILE = path.join(DB_DIR, "messages.json");
 const SHARED_TASKS_FILE = path.join(DB_DIR, "sharedTasks.json");
 const FOCUS_ROOMS_FILE = path.join(DB_DIR, "focusRooms.json");
 const USERDATA_DIR = path.join(DB_DIR, "userdata");
+const UPLOADS_DIR = path.join(__dirname, "uploads");
+const CHAT_UPLOADS_DIR = path.join(UPLOADS_DIR, "chat");
 
 ensureDir(DB_DIR);
 ensureDir(USERDATA_DIR);
+ensureDir(CHAT_UPLOADS_DIR);
 ensureFile(USERS_FILE, []);
 ensureFile(MESSAGES_FILE, []);
 ensureFile(SHARED_TASKS_FILE, []);
@@ -39,6 +45,31 @@ app.use(cors({
   }
 }));
 app.use(express.json({ limit: "2mb" }));
+app.use("/uploads", express.static(UPLOADS_DIR));
+
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, callback) => callback(null, CHAT_UPLOADS_DIR),
+    filename: (_req, file, callback) => {
+      const extension = {
+        "image/jpeg": ".jpg",
+        "image/png": ".png",
+        "image/webp": ".webp",
+        "image/gif": ".gif"
+      }[file.mimetype] || path.extname(file.originalname).toLowerCase();
+      callback(null, `${createId("img")}${extension}`);
+    }
+  }),
+  fileFilter: (_req, file, callback) => {
+    const allowedTypes = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+    if (!allowedTypes.has(file.mimetype)) {
+      callback(new Error("只允許上傳 JPG、PNG、WebP 或 GIF 圖片"));
+      return;
+    }
+    callback(null, true);
+  },
+  limits: { fileSize: 10 * 1024 * 1024 }
+});
 
 function ensureDir(dirPath) {
   if (!fs.existsSync(dirPath)) fs.mkdirSync(dirPath, { recursive: true });
@@ -172,12 +203,67 @@ function saveUserData(userId, data) {
   safeWriteJSON(getUserDataFile(userId), normalizeUserData(data));
 }
 
+function getDmRoomId(userIdA, userIdB) {
+  return ["dm", ...[userIdA, userIdB].map(String).sort()].join("_");
+}
+
+function normalizeMessage(message = {}) {
+  const senderId = String(message.senderId || "");
+  const receiverId = String(message.receiverId || "");
+  const type = ["text", "quick", "image"].includes(message.type) ? message.type : "text";
+  return {
+    id: message.id || createId("msg"),
+    roomId: message.roomId || (senderId && receiverId ? getDmRoomId(senderId, receiverId) : ""),
+    senderId,
+    receiverId,
+    type,
+    content: String(message.content || "").slice(0, 1000),
+    imageUrl: message.imageUrl || "",
+    createdAt: message.createdAt || new Date().toISOString()
+  };
+}
+
 function loadMessages() {
-  return safeReadJSON(MESSAGES_FILE, []);
+  const raw = safeReadJSON(MESSAGES_FILE, []);
+  const messages = Array.isArray(raw) ? raw : [];
+  const normalized = messages.map(normalizeMessage);
+  if (JSON.stringify(messages) !== JSON.stringify(normalized)) {
+    saveMessages(normalized);
+  }
+  return normalized;
 }
 
 function saveMessages(messages) {
-  safeWriteJSON(MESSAGES_FILE, messages);
+  safeWriteJSON(MESSAGES_FILE, (Array.isArray(messages) ? messages : []).map(normalizeMessage));
+}
+
+function getDmMessages(userId, friendId, limit = 100) {
+  const roomId = getDmRoomId(userId, friendId);
+  return loadMessages()
+    .filter((message) => message.roomId === roomId)
+    .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))
+    .slice(-limit);
+}
+
+function createChatMessage({ senderId, receiverId, type = "text", content = "", imageUrl = "" }) {
+  const message = normalizeMessage({
+    id: createId("msg"),
+    roomId: getDmRoomId(senderId, receiverId),
+    senderId,
+    receiverId,
+    type,
+    content,
+    imageUrl,
+    createdAt: new Date().toISOString()
+  });
+  const messages = loadMessages();
+  messages.push(message);
+  saveMessages(messages);
+  return message;
+}
+
+function emitChatMessage(message) {
+  if (typeof io !== "undefined") io.to(message.roomId).emit("message:new", message);
 }
 
 function loadSharedTasks() {
@@ -709,13 +795,7 @@ app.get("/messages/:friendId", authMiddleware, (req, res) => {
     const result = requireFriend(req, res, users, req.params.friendId);
     if (!result) return;
     const { friend } = result;
-    const messages = loadMessages()
-      .filter((message) => (
-        (message.senderId === req.userId && message.receiverId === friend.id)
-        || (message.senderId === friend.id && message.receiverId === req.userId)
-      ))
-      .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
-    res.json({ messages });
+    res.json({ messages: getDmMessages(req.userId, friend.id, 100) });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "取得訊息失敗" });
@@ -732,22 +812,52 @@ app.post("/messages/send", authMiddleware, (req, res) => {
     const type = req.body?.type === "quick" ? "quick" : "text";
     if (!content) return res.status(400).json({ error: "訊息不可為空" });
 
-    const message = {
-      id: createId("m"),
+    const message = createChatMessage({
       senderId: req.userId,
       receiverId: friendId,
       type,
-      content: content.slice(0, 1000),
-      createdAt: new Date().toISOString()
-    };
-    const messages = loadMessages();
-    messages.push(message);
-    saveMessages(messages);
+      content: content.slice(0, 1000)
+    });
+    emitChatMessage(message);
     res.json({ success: true, message });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "送出訊息失敗" });
   }
+});
+
+app.post("/messages/upload-image", authMiddleware, (req, res) => {
+  upload.single("image")(req, res, (uploadErr) => {
+    try {
+      if (uploadErr) {
+        const message = uploadErr.code === "LIMIT_FILE_SIZE" ? "圖片大小不可超過 10MB" : uploadErr.message;
+        return res.status(400).json({ error: message });
+      }
+      const friendId = String(req.body?.friendId || "").trim();
+      const users = loadUsers();
+      const result = requireFriend(req, res, users, friendId);
+      if (!result) {
+        if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+        return;
+      }
+      if (!req.file) return res.status(400).json({ error: "請選擇圖片" });
+
+      const imageUrl = `/uploads/chat/${req.file.filename}`;
+      const message = createChatMessage({
+        senderId: req.userId,
+        receiverId: friendId,
+        type: "image",
+        content: String(req.body?.content || "").trim().slice(0, 1000),
+        imageUrl
+      });
+      emitChatMessage(message);
+      res.json({ success: true, message });
+    } catch (err) {
+      if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      console.error(err);
+      res.status(500).json({ error: "圖片上傳失敗" });
+    }
+  });
 });
 
 app.post("/tasks/share", authMiddleware, (req, res) => {
@@ -1002,6 +1112,110 @@ app.post("/ai/suggest-task", handleMockAI(buildMockSuggestTask));
 app.post("/ai/breakdown-task", handleMockAI(buildMockBreakdownTask));
 app.post("/ai/analyze", handleMockAI(buildMockAnalyze));
 
-app.listen(PORT, () => {
-  console.log(`Focus OS V2 backend running on port ${PORT}`);
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: allowedOrigins.length ? allowedOrigins : true,
+    methods: ["GET", "POST"]
+  }
+});
+const onlineUsers = new Map();
+
+function addOnlineSocket(userId, socketId) {
+  const sockets = onlineUsers.get(userId) || new Set();
+  sockets.add(socketId);
+  onlineUsers.set(userId, sockets);
+}
+
+function removeOnlineSocket(userId, socketId) {
+  const sockets = onlineUsers.get(userId);
+  if (!sockets) return false;
+  sockets.delete(socketId);
+  if (sockets.size) {
+    onlineUsers.set(userId, sockets);
+    return true;
+  }
+  onlineUsers.delete(userId);
+  return false;
+}
+
+function requireSocketFriend(socket, friendId) {
+  const users = loadUsers();
+  const user = getUserById(users, socket.userId);
+  const friend = getUserById(users, friendId);
+  if (!user || !friend || !areFriends(user, friend.id)) return null;
+  return { user, friend };
+}
+
+io.use((socket, next) => {
+  try {
+    const token = socket.handshake.auth?.token;
+    if (!token) return next(new Error("請先登入"));
+    const decoded = jwt.verify(token, JWT_SECRET);
+    const user = getUserById(loadUsers(), decoded.id);
+    if (!user) return next(new Error("找不到使用者"));
+    socket.userId = decoded.id;
+    next();
+  } catch (_) {
+    next(new Error("登入狀態已失效，請重新登入"));
+  }
+});
+
+io.on("connection", (socket) => {
+  addOnlineSocket(socket.userId, socket.id);
+  Array.from(onlineUsers.keys()).forEach((userId) => {
+    socket.emit("presence:update", { userId, online: true });
+  });
+  io.emit("presence:update", { userId: socket.userId, online: true });
+
+  socket.on("join:dm", ({ friendId } = {}) => {
+    const result = requireSocketFriend(socket, String(friendId || ""));
+    if (!result) {
+      socket.emit("chat:error", { error: "只能與好友聊天" });
+      return;
+    }
+    const roomId = getDmRoomId(socket.userId, result.friend.id);
+    socket.join(roomId);
+    socket.emit("messages:history", getDmMessages(socket.userId, result.friend.id, 50));
+  });
+
+  socket.on("message:send", ({ friendId, content, type = "text" } = {}) => {
+    const result = requireSocketFriend(socket, String(friendId || ""));
+    if (!result) {
+      socket.emit("chat:error", { error: "只能傳訊息給好友" });
+      return;
+    }
+    const text = String(content || "").trim().slice(0, 1000);
+    if (!text) return;
+    const message = createChatMessage({
+      senderId: socket.userId,
+      receiverId: result.friend.id,
+      type: type === "quick" ? "quick" : "text",
+      content: text
+    });
+    io.to(message.roomId).emit("message:new", message);
+  });
+
+  socket.on("typing:start", ({ friendId } = {}) => {
+    const result = requireSocketFriend(socket, String(friendId || ""));
+    if (!result) return;
+    const roomId = getDmRoomId(socket.userId, result.friend.id);
+    socket.to(roomId).emit("typing:update", { userId: socket.userId, typing: true });
+  });
+
+  socket.on("typing:stop", ({ friendId } = {}) => {
+    const result = requireSocketFriend(socket, String(friendId || ""));
+    if (!result) return;
+    const roomId = getDmRoomId(socket.userId, result.friend.id);
+    socket.to(roomId).emit("typing:update", { userId: socket.userId, typing: false });
+  });
+
+  socket.on("disconnect", () => {
+    const stillOnline = removeOnlineSocket(socket.userId, socket.id);
+    if (!stillOnline) io.emit("presence:update", { userId: socket.userId, online: false });
+  });
+});
+
+server.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 });

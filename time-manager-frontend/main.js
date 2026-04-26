@@ -146,6 +146,11 @@ let friendsState = {
   focusPollTimer: null,
   focusPollFriendId: null
 };
+let chatSocket = null;
+let activeChatFriendId = null;
+let activeMessages = [];
+let typingTimer = null;
+let onlineUserIds = new Set();
 
 const timerState = {
   remainingSeconds: 25 * 60,
@@ -682,8 +687,11 @@ function applyLanguage() {
   setPlaceholder("friendInviteEmail", ui("friend@example.com", "friend@example.com"));
   setText("#friendInviteForm button[type='submit']", ui("送出邀請", "Send invite"));
   setText("#page-friends .chat-panel .eyebrow", ui("私訊聊天區", "Direct Messages"));
-  setPlaceholder("messageInput", ui("輸入訊息...", "Type a message..."));
-  setText("#messageForm button[type='submit']", ui("送出", "Send"));
+  setPlaceholder("chatInput", ui("輸入訊息...", "Type a message..."));
+  setText("#openImagePickerBtn", ui("圖片", "Image"));
+  setText("#chatForm button[type='submit']", ui("送出", "Send"));
+  setText("#typingIndicator", ui("對方正在輸入...", "Friend is typing..."));
+  updateChatPresenceLabel();
   document.querySelectorAll(".quick-message").forEach((button, index) => {
     const zh = QUICK_MESSAGES[index] || button.dataset.message || button.textContent;
     const en = [
@@ -2159,6 +2167,10 @@ function stopFocusRoomPolling() {
 
 function resetFriendsState() {
   stopFocusRoomPolling();
+  disconnectChatSocket();
+  activeChatFriendId = null;
+  activeMessages = [];
+  onlineUserIds = new Set();
   friendsState = {
     friends: [],
     requests: { incoming: [], outgoing: [] },
@@ -2171,12 +2183,175 @@ function resetFriendsState() {
   };
 }
 
+function initChatSocket() {
+  connectChatSocket();
+}
+
+function connectChatSocket() {
+  if (authState.mode !== "user" || !authState.token) return null;
+  if (!window.io) {
+    console.warn("Socket.IO client is not loaded.");
+    return null;
+  }
+  if (chatSocket?.connected) return chatSocket;
+  if (chatSocket) {
+    chatSocket.auth = { token: authState.token };
+    chatSocket.connect();
+    return chatSocket;
+  }
+
+  chatSocket = window.io(API_BASE, {
+    auth: { token: authState.token },
+    transports: ["websocket", "polling"]
+  });
+
+  chatSocket.on("connect", () => {
+    if (activeChatFriendId) chatSocket.emit("join:dm", { friendId: activeChatFriendId });
+  });
+  chatSocket.on("messages:history", (messages) => {
+    activeMessages = Array.isArray(messages) ? messages : [];
+    friendsState.messages = activeMessages;
+    renderMessages();
+  });
+  chatSocket.on("message:new", (message) => {
+    if (!isActiveDmMessage(message)) return;
+    addOrUpdateMessage(message);
+    renderMessages();
+  });
+  chatSocket.on("typing:update", ({ userId, typing } = {}) => {
+    showTypingIndicator(userId, typing);
+  });
+  chatSocket.on("presence:update", ({ userId, online } = {}) => {
+    if (!userId) return;
+    if (online) onlineUserIds.add(userId);
+    else onlineUserIds.delete(userId);
+    updateChatPresenceLabel();
+  });
+  chatSocket.on("chat:error", (payload) => {
+    showToast(payload?.error || ui("聊天連線發生問題", "Chat connection issue"));
+  });
+
+  return chatSocket;
+}
+
+function disconnectChatSocket() {
+  if (typingTimer) clearTimeout(typingTimer);
+  typingTimer = null;
+  if (chatSocket) {
+    chatSocket.disconnect();
+    chatSocket = null;
+  }
+}
+
+function isActiveDmMessage(message) {
+  if (!message || !activeChatFriendId) return false;
+  return (message.senderId === authState.user?.id && message.receiverId === activeChatFriendId)
+    || (message.senderId === activeChatFriendId && message.receiverId === authState.user?.id);
+}
+
+function addOrUpdateMessage(message) {
+  const normalized = {
+    ...message,
+    content: message?.content || "",
+    imageUrl: message?.imageUrl || ""
+  };
+  const index = activeMessages.findIndex((item) => item.id === normalized.id);
+  if (index >= 0) activeMessages[index] = normalized;
+  else activeMessages.push(normalized);
+  activeMessages.sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+  friendsState.messages = activeMessages;
+}
+
+function getMessageImageUrl(imageUrl) {
+  if (!imageUrl) return "";
+  if (/^(https?:|data:|blob:)/.test(imageUrl)) return imageUrl;
+  return `${API_BASE}${imageUrl.startsWith("/") ? "" : "/"}${imageUrl}`;
+}
+
+function updateChatPresenceLabel() {
+  const label = $("chatPresenceLabel");
+  if (!label) return;
+  const friendId = activeChatFriendId || friendsState.selectedFriendId;
+  const online = friendId && onlineUserIds.has(friendId);
+  label.textContent = online ? ui("在線", "Online") : ui("離線", "Offline");
+  label.classList.toggle("online", Boolean(online));
+}
+
+async function joinDm(friendId) {
+  if (!friendId) return;
+  if (authState.mode !== "user") {
+    renderMessages();
+    return;
+  }
+  activeChatFriendId = friendId;
+  activeMessages = [];
+  friendsState.messages = activeMessages;
+  connectChatSocket();
+  if (chatSocket?.connected) chatSocket.emit("join:dm", { friendId });
+  await fetchMessages(friendId);
+  updateChatPresenceLabel();
+  renderMessages();
+}
+
+function sendChatMessage() {
+  const input = $("chatInput");
+  const content = input?.value.trim() || "";
+  if (!content) return;
+  sendMessage(activeChatFriendId, content, "text");
+  if (input) input.value = "";
+  if (chatSocket?.connected && activeChatFriendId) chatSocket.emit("typing:stop", { friendId: activeChatFriendId });
+}
+
+function sendQuickMessage(content) {
+  sendMessage(activeChatFriendId, content, "quick");
+}
+
+async function handleImageUpload(file) {
+  if (!activeChatFriendId) return alert(ui("請先選擇好友。", "Choose a friend first."));
+  if (authState.mode !== "user") return alert(ui("請先登入。", "Please sign in first."));
+  if (!file) return;
+  const allowedTypes = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+  if (!allowedTypes.has(file.type)) return alert(ui("只允許 JPG、PNG、WebP 或 GIF 圖片。", "Only JPG, PNG, WebP, or GIF images are allowed."));
+  if (file.size > 10 * 1024 * 1024) return alert(ui("圖片大小不可超過 10MB。", "Image size cannot exceed 10MB."));
+
+  const form = new FormData();
+  form.append("friendId", activeChatFriendId);
+  form.append("image", file);
+  try {
+    const res = await fetch(`${API_BASE}/messages/upload-image`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${authState.token}` },
+      body: form
+    });
+    if (!res.ok) {
+      const errorJson = await res.json().catch(() => ({}));
+      throw new Error(errorJson.error || `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    if (data.message) {
+      addOrUpdateMessage(data.message);
+      renderMessages();
+    }
+  } catch (err) {
+    alert(ui(`圖片上傳失敗：${err.message}`, `Image upload failed: ${err.message}`));
+  }
+}
+
+function showTypingIndicator(userId, typing) {
+  const indicator = $("typingIndicator");
+  if (!indicator || userId === authState.user?.id) return;
+  indicator.classList.toggle("hidden", !typing);
+}
+
 function selectFriend(friendId) {
   const changed = friendsState.selectedFriendId !== friendId;
   if (changed) {
     friendsState.messages = [];
+    activeChatFriendId = null;
+    activeMessages = [];
     friendsState.focusRoom = null;
     if (friendsState.focusPollFriendId !== friendId) stopFocusRoomPolling();
+    showTypingIndicator(null, false);
   }
   friendsState.selectedFriendId = friendId;
   const friend = selectedFriend();
@@ -2286,18 +2461,20 @@ async function updateFriendMeta() {
 
 async function openChat(friendId) {
   selectFriend(friendId);
-  await fetchMessages(friendId);
+  await joinDm(friendId);
   renderFriendsContent();
 }
 
 async function fetchMessages(friendId) {
   if (!friendId || authState.mode !== "user") {
+    activeMessages = [];
     friendsState.messages = [];
     return [];
   }
   const data = await authenticatedApiRequest(`/messages/${encodeURIComponent(friendId)}`);
-  friendsState.messages = Array.isArray(data.messages) ? data.messages : [];
-  return friendsState.messages;
+  activeMessages = Array.isArray(data.messages) ? data.messages : [];
+  friendsState.messages = activeMessages;
+  return activeMessages;
 }
 
 async function sendMessage(friendId, content, type = "text") {
@@ -2305,12 +2482,17 @@ async function sendMessage(friendId, content, type = "text") {
   const message = String(content || "").trim();
   if (!message) return;
   try {
-    await authenticatedApiRequest("/messages/send", {
-      method: "POST",
-      body: JSON.stringify({ friendId, content: message, type })
-    });
-    await fetchMessages(friendId);
-    renderMessages();
+    connectChatSocket();
+    if (chatSocket?.connected) {
+      chatSocket.emit("message:send", { friendId, content: message, type });
+    } else {
+      const data = await authenticatedApiRequest("/messages/send", {
+        method: "POST",
+        body: JSON.stringify({ friendId, content: message, type })
+      });
+      if (data.message) addOrUpdateMessage(data.message);
+      renderMessages();
+    }
   } catch (err) {
     alert(ui(`訊息送出失敗：${err.message}`, `Message failed: ${err.message}`));
   }
@@ -2321,19 +2503,25 @@ function renderMessages() {
   const friend = selectedFriend();
   if (!list) return;
   if (!friend) {
-    list.innerHTML = `<p class="empty-state">${ui("請先從好友列表選擇聊天對象。", "Choose a friend from the list first.")}</p>`;
+    list.innerHTML = `<p class="empty-state">${authState.mode === "user" ? ui("請先從好友列表選擇聊天對象。", "Choose a friend from the list first.") : ui("請先登入才能使用聊天。", "Sign in to use chat.")}</p>`;
     return;
   }
-  if (!friendsState.messages.length) {
+  if (!activeMessages.length) {
     list.innerHTML = `<p class="empty-state">${ui("還沒有訊息，傳一個快速訊息開始。", "No messages yet. Send a quick message to start.")}</p>`;
     return;
   }
-  list.innerHTML = friendsState.messages.map((message) => {
+  list.innerHTML = activeMessages.map((message) => {
     const isMe = message.senderId === authState.user?.id;
+    const imageUrl = getMessageImageUrl(message.imageUrl);
+    const imageHtml = message.type === "image" && imageUrl
+      ? `<a href="${escapeHtml(imageUrl)}" target="_blank" rel="noopener"><img class="message-image" src="${escapeHtml(imageUrl)}" alt="${ui("聊天圖片", "Chat image")}" /></a>`
+      : "";
+    const contentHtml = message.content ? `<p>${escapeHtml(message.content)}</p>` : "";
     return `
       <div class="message-bubble ${isMe ? "me" : "friend"}">
-        <p>${escapeHtml(message.content)}</p>
-        <span>${message.type === "quick" ? ui("快速訊息", "Quick") : ui("文字", "Text")} · ${formatDateTime(message.createdAt)}</span>
+        ${imageHtml}
+        ${contentHtml}
+        <span>${message.type === "image" ? ui("圖片", "Image") : message.type === "quick" ? ui("快速訊息", "Quick") : ui("文字", "Text")} · ${formatDateTime(message.createdAt)}</span>
       </div>
     `;
   }).join("");
@@ -2553,10 +2741,11 @@ function renderFriendsContent() {
   const signedIn = authState.mode === "user";
   const friend = selectedFriend();
   setText("#friendCountLabel", String(friendsState.friends.length));
-  setText("#chatFriendName", friend ? friendDisplayName(friend) : ui("選擇好友開始聊天", "Choose a friend to chat"));
+  setText("#chatFriendName", friend ? friendDisplayName(friend) : ui("請選擇好友", "Choose a friend"));
   setText("#shareFriendName", friend ? ui(`分享任務給 ${friendDisplayName(friend)}`, `Share a task with ${friendDisplayName(friend)}`) : ui("選擇好友分享任務", "Choose a friend to share a task"));
   setText("#focusRoomFriendName", friend ? ui(`和 ${friendDisplayName(friend)} 一起專注`, `Focus with ${friendDisplayName(friend)}`) : ui("選擇好友一起專注", "Choose a friend to focus together"));
   setText("#metaFriendName", friend ? ui(`設定 ${friendDisplayName(friend)}`, `Settings for ${friendDisplayName(friend)}`) : ui("選擇好友設定備註", "Choose a friend for notes"));
+  updateChatPresenceLabel();
 
   if (!signedIn) {
     friendList.innerHTML = `<p class="empty-state">${ui("請先登入才能使用 Friends+。", "Sign in to use Friends+.")}</p>`;
@@ -2715,6 +2904,7 @@ async function handleAuthSubmit() {
     saveData();
     $("authModal").classList.add("hidden");
     updateAuthUI();
+    initChatSocket();
     applySettingsToTimer();
     renderAll();
     showToast(ui("已登入並同步資料", "Signed in and synced data"));
@@ -2884,16 +3074,26 @@ function bindEvents() {
     event.preventDefault();
     sendFriendRequest();
   };
-  $("messageForm").onsubmit = (event) => {
+  $("chatForm").onsubmit = (event) => {
     event.preventDefault();
-    const friend = selectedFriend();
-    const input = $("messageInput");
-    sendMessage(friend?.id, input?.value || "", "text");
-    if (input) input.value = "";
+    sendChatMessage();
   };
   document.querySelectorAll(".quick-message").forEach((button) => {
-    button.onclick = () => sendMessage(friendsState.selectedFriendId, button.dataset.message || button.textContent, "quick");
+    button.onclick = () => sendQuickMessage(button.dataset.message || button.textContent);
   });
+  $("chatInput").oninput = () => {
+    if (!activeChatFriendId || !chatSocket?.connected) return;
+    chatSocket.emit("typing:start", { friendId: activeChatFriendId });
+    if (typingTimer) clearTimeout(typingTimer);
+    typingTimer = setTimeout(() => {
+      chatSocket?.emit("typing:stop", { friendId: activeChatFriendId });
+    }, 900);
+  };
+  $("openImagePickerBtn").onclick = () => $("chatImageInput").click();
+  $("chatImageInput").onchange = (event) => {
+    handleImageUpload(event.target.files?.[0]);
+    event.target.value = "";
+  };
   $("shareTaskBtn").onclick = () => shareTaskWithFriend(friendsState.selectedFriendId, $("shareTaskSelect")?.value || "");
   $("createFocusRoomBtn").onclick = () => createFocusRoom(friendsState.selectedFriendId);
   $("friendMetaForm").onsubmit = (event) => {
@@ -2938,6 +3138,7 @@ async function init() {
     || null;
   applyLanguage();
   updateAuthUI();
+  initChatSocket();
   applySettingsToTimer();
   setPage("dashboard");
 }
