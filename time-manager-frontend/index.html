@@ -26,6 +26,7 @@
         <button class="nav-link" data-page="groups" type="button">群組</button>
         <button class="nav-link" data-page="threads" type="button">討論區</button>
         <button class="nav-link" data-page="ai" type="button">AI 助理</button>
+        <button class="nav-link hidden" data-page="admin" type="button">管理</button>
         <button class="nav-link" data-page="settings" type="button">設定</button>
       </nav>
 
@@ -551,6 +552,20 @@
               </div>
             </div>
             <ul id="aiLogsList" class="history-list"></ul>
+          </section>
+        </div>
+      </section>
+
+      <section id="page-admin" class="page" data-page-title="管理面板" data-page-eyebrow="管理" data-page-subtitle="管理員專用功能。">
+        <div class="admin-layout">
+          <section class="panel">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">使用者管理</p>
+                <h3>所有使用者</h3>
+              </div>
+            </div>
+            <ul id="adminUsersList" class="admin-users-list"></ul>
           </section>
         </div>
       </section>

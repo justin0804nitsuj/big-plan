@@ -1463,3 +1463,57 @@ h3 {
     grid-column: auto;
   }
 }
+
+/* Admin styles */
+.admin-layout {
+  display: grid;
+  gap: 24px;
+}
+
+.admin-users-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.admin-user-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 8px;
+}
+
+.admin-user-item strong {
+  color: var(--accent);
+}
+
+.admin-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.admin-actions button {
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+/* Message actions */
+.message-action {
+  margin-left: 8px;
+  padding: 2px 6px;
+  font-size: 11px;
+  border-radius: 4px;
+}
+
+.message-action.delete-btn {
+  background: var(--muted);
+  color: var(--bg);
+}
+
+.message-action.recall-btn {
+  background: var(--danger);
+  color: var(--text);
+}

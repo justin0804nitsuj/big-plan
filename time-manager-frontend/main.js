@@ -2196,6 +2196,72 @@ function renderAILogs() {
   `).join("");
 }
 
+async function renderAdmin() {
+  const list = $("adminUsersList");
+  if (!list) return;
+
+  try {
+    const response = await authenticatedApiRequest("/admin/users");
+    const users = response.users || [];
+    list.innerHTML = users.map((user) => `
+      <li class="admin-user-item">
+        <div>
+          <strong>${escapeHtml(user.name || "無名稱")}</strong> (${escapeHtml(user.email)})
+          <span class="status-pill">${user.isAdmin ? ui("管理員", "Admin") : ui("使用者", "User")}</span>
+        </div>
+        <div class="admin-actions">
+          <button class="small secondary view-user-btn" data-user-id="${user.id}" type="button">${ui("查看", "View")}</button>
+          <button class="small danger reset-data-btn" data-user-id="${user.id}" type="button">${ui("重設資料", "Reset Data")}</button>
+          <button class="small danger delete-user-btn" data-user-id="${user.id}" type="button">${ui("刪除", "Delete")}</button>
+        </div>
+      </li>
+    `).join("");
+
+    list.querySelectorAll(".view-user-btn").forEach(btn => {
+      btn.onclick = () => viewUser(btn.dataset.userId);
+    });
+    list.querySelectorAll(".reset-data-btn").forEach(btn => {
+      btn.onclick = () => resetUserData(btn.dataset.userId);
+    });
+    list.querySelectorAll(".delete-user-btn").forEach(btn => {
+      btn.onclick = () => deleteUser(btn.dataset.userId);
+    });
+  } catch (err) {
+    list.innerHTML = `<li class="error-state">${ui("載入使用者列表失敗：", "Failed to load users:")} ${err.message}</li>`;
+  }
+}
+
+async function viewUser(userId) {
+  try {
+    const response = await authenticatedApiRequest(`/admin/users/${encodeURIComponent(userId)}`);
+    alert(JSON.stringify(response.user, null, 2));
+  } catch (err) {
+    alert(ui(`查看使用者失敗：${err.message}`, `View user failed: ${err.message}`));
+  }
+}
+
+async function resetUserData(userId) {
+  if (!confirm(ui("確定要重設這個使用者的資料？", "Reset this user's data?"))) return;
+  try {
+    await authenticatedApiRequest(`/admin/users/${encodeURIComponent(userId)}/reset-data`, { method: "POST" });
+    showToast(ui("使用者資料已重設", "User data reset"));
+    renderAdmin();
+  } catch (err) {
+    alert(ui(`重設資料失敗：${err.message}`, `Reset data failed: ${err.message}`));
+  }
+}
+
+async function deleteUser(userId) {
+  if (!confirm(ui("確定要刪除這個使用者？", "Delete this user?"))) return;
+  try {
+    await authenticatedApiRequest(`/admin/users/${encodeURIComponent(userId)}`, { method: "DELETE" });
+    showToast(ui("使用者已刪除", "User deleted"));
+    renderAdmin();
+  } catch (err) {
+    alert(ui(`刪除使用者失敗：${err.message}`, `Delete user failed: ${err.message}`));
+  }
+}
+
 function selectedFriend() {
   return friendsState.friends.find((friend) => friend.id === friendsState.selectedFriendId) || null;
 }
@@ -2301,6 +2367,31 @@ function connectChatSocket() {
       }
     }
   });
+  chatSocket.on("group:message:new", (message) => {
+    if (isActiveGroupMessage(message)) {
+      addOrUpdateGroupMessage(message);
+      renderGroupMessages();
+      // 同時更新 groups 頁面的訊息
+      if (groupsState.selectedGroupId === activeGroupId) {
+        addOrUpdateGroupsMessage(message);
+        renderGroupChat();
+      }
+    }
+  });
+  chatSocket.on("group:message:recalled", ({ messageId }) => {
+    if (activeGroupId) {
+      recallGroupMessage(messageId);
+      renderGroupMessages();
+      if (groupsState.selectedGroupId === activeGroupId) {
+        recallGroupsMessage(messageId);
+        renderGroupChat();
+      }
+    }
+  });
+  chatSocket.on("message:recalled", ({ messageId }) => {
+    recallMessage(messageId);
+    renderMessages();
+  });
   chatSocket.on("typing:update", ({ userId, typing } = {}) => {
     showTypingIndicator(userId, typing);
   });
@@ -2348,6 +2439,15 @@ function addOrUpdateMessage(message) {
   else activeMessages.push(normalized);
   activeMessages.sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
   friendsState.messages = activeMessages;
+}
+
+function recallMessage(messageId) {
+  const message = activeMessages.find(m => m.id === messageId);
+  if (message) {
+    message.recalledAt = new Date().toISOString();
+    message.content = "";
+    message.imageUrl = "";
+  }
 }
 
 function getMessageImageUrl(imageUrl) {
@@ -2526,6 +2626,29 @@ async function fetchFriendRequests() {
     outgoing: Array.isArray(data.outgoing) ? data.outgoing : []
   };
   return friendsState.requests;
+}
+
+async function deleteMessageForMe(messageId) {
+  try {
+    await authenticatedApiRequest(`/messages/${encodeURIComponent(messageId)}/delete-for-me`, {
+      method: "POST"
+    });
+    // 重新渲染以隱藏訊息
+    renderMessages();
+  } catch (err) {
+    alert(ui(`刪除訊息失敗：${err.message}`, `Delete message failed: ${err.message}`));
+  }
+}
+
+async function recallMessage(messageId) {
+  try {
+    await authenticatedApiRequest(`/messages/${encodeURIComponent(messageId)}/recall`, {
+      method: "POST"
+    });
+    // 重新渲染會由 socket 事件處理
+  } catch (err) {
+    alert(ui(`收回訊息失敗：${err.message}`, `Recall message failed: ${err.message}`));
+  }
 }
 
 async function sendFriendRequest() {
@@ -2743,6 +2866,24 @@ function addOrUpdateGroupsMessage(message) {
   groupsState.groupMessages.sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
 }
 
+function recallGroupMessage(messageId) {
+  const message = activeGroupMessages.find(m => m.id === messageId);
+  if (message) {
+    message.recalledAt = new Date().toISOString();
+    message.content = "";
+    message.imageUrl = "";
+  }
+}
+
+function recallGroupsMessage(messageId) {
+  const message = groupsState.groupMessages.find(m => m.id === messageId);
+  if (message) {
+    message.recalledAt = new Date().toISOString();
+    message.content = "";
+    message.imageUrl = "";
+  }
+}
+
 function renderGroupMessages() {
   const list = $("messageList");
   if (!list) return;
@@ -2756,20 +2897,33 @@ function renderGroupMessages() {
   }
   list.innerHTML = activeGroupMessages.map((message) => {
     const isMe = message.senderId === authState.user?.id;
+    if (message.deletedFor && message.deletedFor.includes(authState.user?.id)) return "";
+    const recalled = message.recalledAt;
     const imageUrl = getMessageImageUrl(message.imageUrl);
-    const imageHtml = message.type === "image" && imageUrl
+    const imageHtml = !recalled && message.type === "image" && imageUrl
       ? `<a href="${escapeHtml(imageUrl)}" target="_blank" rel="noopener"><img class="message-image" src="${escapeHtml(imageUrl)}" alt="${ui("聊天圖片", "Chat image")}" /></a>`
       : "";
-    const contentHtml = message.content ? `<p>${escapeHtml(message.content)}</p>` : "";
+    const contentHtml = recalled ? `<p>${ui("此訊息已收回", "This message was recalled")}</p>` : message.content ? `<p>${escapeHtml(message.content)}</p>` : "";
+    const deleteBtn = isMe && !recalled ? `<button class="message-action delete-btn" data-message-id="${message.id}" type="button">${ui("刪除", "Delete")}</button>` : "";
+    const recallBtn = isMe && !recalled ? `<button class="message-action recall-btn" data-message-id="${message.id}" type="button">${ui("收回", "Recall")}</button>` : "";
     return `
       <div class="message-bubble ${isMe ? "me" : "friend"}">
         ${imageHtml}
         ${contentHtml}
         <span>${message.type === "image" ? ui("圖片", "Image") : message.type === "quick" ? ui("快速訊息", "Quick") : ui("文字", "Text")} · ${formatDateTime(message.createdAt)}</span>
+        ${deleteBtn}${recallBtn}
       </div>
     `;
-  }).join("");
+  }).join("").replace(/<div class="message-bubble[^>]*><\/div>/g, "");
   list.scrollTop = list.scrollHeight;
+
+  // 新增事件監聽器
+  list.querySelectorAll(".delete-btn").forEach(btn => {
+    btn.onclick = () => deleteMessageForMe(btn.dataset.messageId);
+  });
+  list.querySelectorAll(".recall-btn").forEach(btn => {
+    btn.onclick = () => recallMessage(btn.dataset.messageId);
+  });
 }
 
 function renderMessages() {
@@ -2793,20 +2947,33 @@ function renderMessages() {
   }
   list.innerHTML = activeMessages.map((message) => {
     const isMe = message.senderId === authState.user?.id;
+    if (message.deletedFor && message.deletedFor.includes(authState.user?.id)) return "";
+    const recalled = message.recalledAt;
     const imageUrl = getMessageImageUrl(message.imageUrl);
-    const imageHtml = message.type === "image" && imageUrl
+    const imageHtml = !recalled && message.type === "image" && imageUrl
       ? `<a href="${escapeHtml(imageUrl)}" target="_blank" rel="noopener"><img class="message-image" src="${escapeHtml(imageUrl)}" alt="${ui("聊天圖片", "Chat image")}" /></a>`
       : "";
-    const contentHtml = message.content ? `<p>${escapeHtml(message.content)}</p>` : "";
+    const contentHtml = recalled ? `<p>${ui("此訊息已收回", "This message was recalled")}</p>` : message.content ? `<p>${escapeHtml(message.content)}</p>` : "";
+    const deleteBtn = isMe && !recalled ? `<button class="message-action delete-btn" data-message-id="${message.id}" type="button">${ui("刪除", "Delete")}</button>` : "";
+    const recallBtn = isMe && !recalled ? `<button class="message-action recall-btn" data-message-id="${message.id}" type="button">${ui("收回", "Recall")}</button>` : "";
     return `
       <div class="message-bubble ${isMe ? "me" : "friend"}">
         ${imageHtml}
         ${contentHtml}
         <span>${message.type === "image" ? ui("圖片", "Image") : message.type === "quick" ? ui("快速訊息", "Quick") : ui("文字", "Text")} · ${formatDateTime(message.createdAt)}</span>
+        ${deleteBtn}${recallBtn}
       </div>
     `;
-  }).join("");
+  }).join("").replace(/<div class="message-bubble[^>]*><\/div>/g, "");
   list.scrollTop = list.scrollHeight;
+
+  // 新增事件監聽器
+  list.querySelectorAll(".delete-btn").forEach(btn => {
+    btn.onclick = () => deleteMessageForMe(btn.dataset.messageId);
+  });
+  list.querySelectorAll(".recall-btn").forEach(btn => {
+    btn.onclick = () => recallMessage(btn.dataset.messageId);
+  });
 }
 
 async function shareTaskWithFriend(friendId, taskId) {
@@ -3554,21 +3721,34 @@ function renderGroupChat() {
 
   list.innerHTML = groupsState.groupMessages.map((message) => {
     const isMe = message.senderId === authState.user?.id;
+    if (message.deletedFor && message.deletedFor.includes(authState.user?.id)) return "";
+    const recalled = message.recalledAt;
     const imageUrl = getMessageImageUrl(message.imageUrl);
-    const imageHtml = message.type === "image" && imageUrl
+    const imageHtml = !recalled && message.type === "image" && imageUrl
       ? `<a href="${escapeHtml(imageUrl)}" target="_blank" rel="noopener"><img class="message-image" src="${escapeHtml(imageUrl)}" alt="${ui("聊天圖片", "Chat image")}" /></a>`
       : "";
-    const contentHtml = message.content ? `<p>${escapeHtml(message.content)}</p>` : "";
+    const contentHtml = recalled ? `<p>${ui("此訊息已收回", "This message was recalled")}</p>` : message.content ? `<p>${escapeHtml(message.content)}</p>` : "";
+    const deleteBtn = isMe && !recalled ? `<button class="message-action delete-btn" data-message-id="${message.id}" type="button">${ui("刪除", "Delete")}</button>` : "";
+    const recallBtn = isMe && !recalled ? `<button class="message-action recall-btn" data-message-id="${message.id}" type="button">${ui("收回", "Recall")}</button>` : "";
     return `
       <div class="group-message-bubble ${isMe ? "me" : "other"}">
         <div class="message-sender">${escapeHtml(message.senderName || ui("未知", "Unknown"))}</div>
         ${imageHtml}
         ${contentHtml}
         <span>${message.type === "image" ? ui("圖片", "Image") : ui("文字", "Text")} · ${formatDateTime(message.createdAt)}</span>
+        ${deleteBtn}${recallBtn}
       </div>
     `;
-  }).join("");
+  }).join("").replace(/<div class="group-message-bubble[^>]*><\/div>/g, "");
   list.scrollTop = list.scrollHeight;
+
+  // 新增事件監聽器
+  list.querySelectorAll(".delete-btn").forEach(btn => {
+    btn.onclick = () => deleteMessageForMe(btn.dataset.messageId);
+  });
+  list.querySelectorAll(".recall-btn").forEach(btn => {
+    btn.onclick = () => recallMessage(btn.dataset.messageId);
+  });
 }
 
 function renderGroupSettings() {
@@ -3648,6 +3828,7 @@ async function handleAuthSubmit() {
     initChatSocket();
     applySettingsToTimer();
     renderAll();
+    checkAdminStatus();
     showToast(ui("已登入並同步資料", "Signed in and synced data"));
   } catch (err) {
     alert(ui(`登入或註冊失敗：${err.message}`, `Sign in or registration failed: ${err.message}`));
@@ -3664,6 +3845,38 @@ function logout() {
   updateAuthUI();
   applySettingsToTimer();
   renderAll();
+}
+
+async function checkAdminStatus() {
+  if (authState.mode !== "user") {
+    hideAdminNav();
+    return;
+  }
+  try {
+    const response = await authenticatedApiRequest("/admin/me");
+    if (response.isAdmin) {
+      showAdminNav();
+    } else {
+      hideAdminNav();
+    }
+  } catch (err) {
+    console.error("檢查管理員權限失敗:", err);
+    hideAdminNav();
+  }
+}
+
+function showAdminNav() {
+  const adminNav = document.querySelector('.nav-link[data-page="admin"]');
+  if (adminNav) adminNav.classList.remove("hidden");
+}
+
+function hideAdminNav() {
+  const adminNav = document.querySelector('.nav-link[data-page="admin"]');
+  if (adminNav) adminNav.classList.add("hidden");
+  // 如果目前在 admin 頁面，切回 dashboard
+  if (currentPage === "admin") {
+    switchPage("dashboard");
+  }
 }
 
 function renderSettingsUserInfo() {
@@ -3783,6 +3996,11 @@ function renderCurrentPage() {
   if (currentPage === "ai") {
     if (lastAIResult) renderAIResult(lastAIResult);
     renderAILogs();
+    return;
+  }
+
+  if (currentPage === "admin") {
+    renderAdmin();
     return;
   }
 

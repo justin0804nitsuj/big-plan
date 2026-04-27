@@ -229,7 +229,9 @@ function normalizeMessage(message = {}) {
     type,
     content: String(message.content || "").slice(0, 1000),
     imageUrl: message.imageUrl || "",
-    createdAt: message.createdAt || new Date().toISOString()
+    createdAt: message.createdAt || new Date().toISOString(),
+    deletedFor: Array.isArray(message.deletedFor) ? message.deletedFor : [],
+    recalledAt: message.recalledAt || null
   };
 }
 
@@ -1476,6 +1478,17 @@ function adminMiddleware(req, res, next) {
   });
 }
 
+app.get("/admin/me", authMiddleware, (req, res) => {
+  try {
+    const users = loadUsers();
+    const user = getUserById(users, req.userId);
+    res.json({ isAdmin: user ? isAdminUser(user) : false });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "檢查管理員權限失敗" });
+  }
+});
+
 function todayKey() {
   const date = new Date();
   const y = date.getFullYear();
@@ -1947,6 +1960,57 @@ app.post("/messages/upload-image", authMiddleware, (req, res) => {
   });
 });
 
+app.post("/messages/:messageId/delete-for-me", authMiddleware, (req, res) => {
+  try {
+    const messageId = req.params.messageId;
+    const messages = loadMessages();
+    const message = messages.find(m => m.id === messageId);
+    if (!message) return res.status(404).json({ error: "找不到訊息" });
+
+    const canAccess = (message.senderId === req.userId || message.receiverId === req.userId) ||
+                      (message.groupId && isGroupMember(getGroupById(message.groupId), req.userId));
+    if (!canAccess) return res.status(403).json({ error: "無權限刪除此訊息" });
+
+    if (!message.deletedFor.includes(req.userId)) {
+      message.deletedFor.push(req.userId);
+    }
+    saveMessages(messages);
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "刪除訊息失敗" });
+  }
+});
+
+app.post("/messages/:messageId/recall", authMiddleware, (req, res) => {
+  try {
+    const messageId = req.params.messageId;
+    const messages = loadMessages();
+    const message = messages.find(m => m.id === messageId);
+    if (!message) return res.status(404).json({ error: "找不到訊息" });
+    if (message.senderId !== req.userId) return res.status(403).json({ error: "只能收回自己的訊息" });
+
+    message.recalledAt = new Date().toISOString();
+    message.content = "";
+    message.imageUrl = "";
+    saveMessages(messages);
+
+    if (message.groupId) {
+      if (typeof io !== "undefined") {
+        io.to("group_" + message.groupId).emit("group:message:recalled", { messageId });
+      }
+    } else {
+      if (typeof io !== "undefined") {
+        io.to(message.roomId).emit("message:recalled", { messageId });
+      }
+    }
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "收回訊息失敗" });
+  }
+});
+
 app.post("/tasks/share", authMiddleware, (req, res) => {
   try {
     const friendId = String(req.body?.friendId || "").trim();
@@ -2349,7 +2413,7 @@ app.post("/groups/:groupId/upload-image", authMiddleware, upload.single("image")
     });
 
     if (typeof io !== "undefined") {
-      io.to(message.roomId).emit("message:new", message);
+      io.to(message.roomId).emit("group:message:new", message);
     }
 
     res.json({ success: true, message });
