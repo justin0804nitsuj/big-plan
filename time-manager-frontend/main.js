@@ -109,12 +109,12 @@ const PAGE_DEFAULTS = {
     zh: {
       title: "公開討論串",
       eyebrow: "討論區",
-      subtitle: "提出問題、分享知識、獲得解答。"
+      subtitle: "發問、附圖片、回覆與標記最佳解答，讓學習問題可以被整理與解決。"
     },
     en: {
       title: "Public Threads",
       eyebrow: "Threads",
-      subtitle: "Ask questions, share knowledge, and get answers."
+      subtitle: "Ask questions, attach images, reply, and mark accepted answers."
     }
   },
   ai: {
@@ -246,6 +246,8 @@ function pageLabel(page) {
     tasks: ui("任務", "Tasks"),
     learning: ui("學習", "Learning"),
     friends: ui("好友", "Friends"),
+    groups: ui("群組", "Groups"),
+    threads: ui("討論區", "Threads"),
     ai: ui("AI 助理", "AI Assistant"),
     settings: ui("設定", "Settings")
   }[page] || page;
@@ -800,6 +802,27 @@ function applyLanguage() {
   setText("#shortcutNextLabel", ui("切換到下一個左側分頁", "Switch to the next left tab"));
   setText("#shortcutPrevLabel", ui("切換到上一個左側分頁", "Switch to the previous left tab"));
   setText("#shortcutSettingsLabel", ui("直接切換到設定", "Jump directly to Settings"));
+
+  setText("#page-threads .thread-form-panel .eyebrow", ui("發問", "Ask"));
+  setText("#page-threads .thread-form-panel h3", ui("提出新問題", "Ask a New Question"));
+  setControlLabel("threadTitle", ui("標題", "Title"));
+  setControlLabel("threadContent", ui("內容", "Content"));
+  setControlLabel("threadSubject", ui("科目", "Subject"));
+  setControlLabel("threadTags", ui("標籤", "Tags"));
+  setControlLabel("threadImages", ui("圖片", "Images"));
+  setText("#threadForm button[type='submit']", ui("發問", "Ask"));
+  setPlaceholder("threadSearch", ui("搜尋標題或內容...", "Search title or content..."));
+  setText("#page-threads .thread-list-panel .eyebrow", ui("討論串", "Threads"));
+  setText("#page-threads .thread-list-panel h3", ui("所有討論", "All Discussions"));
+  setText("#threadSubjectFilter option[value='']", ui("所有科目", "All Subjects"));
+  setText("#threadStatusFilter option[value='']", ui("所有狀態", "All Statuses"));
+  setText("#threadTagFilter option[value='']", ui("所有標籤", "All Tags"));
+  setText("#page-threads .thread-detail-panel .eyebrow", ui("詳細內容", "Details"));
+  setText("#closeThreadBtn", ui("結案", "Close"));
+  setText("#threadReplies h4", ui("回覆", "Replies"));
+  setControlLabel("replyContent", ui("回覆內容", "Reply Content"));
+  setControlLabel("replyImages", ui("圖片", "Images"));
+  setText("#replyForm button[type='submit']", ui("回覆", "Reply"));
 
   setControlLabel("authNameInput", ui("名稱", "Name"));
   setControlLabel("authEmailInput", ui("電子郵件", "Email"));
@@ -3949,7 +3972,7 @@ async function fetchThreads() {
     updateThreadFilters();
   } catch (error) {
     console.error("Failed to fetch threads:", error);
-    showToast("載入討論串失敗");
+    showToast(ui("載入討論串失敗", "Failed to load threads"));
   }
 }
 
@@ -3967,7 +3990,7 @@ async function createThread() {
   }
 
   if (!formData.get("title") || !formData.get("content")) {
-    showToast("請填寫標題和內容");
+    showToast(ui("請填寫標題和內容", "Please fill in title and content"));
     return;
   }
 
@@ -3976,13 +3999,13 @@ async function createThread() {
       method: "POST",
       body: formData
     });
-    showToast("討論串發問成功");
+    showToast(ui("討論串發問成功", "Thread created successfully"));
     clearThreadForm();
     await fetchThreads();
     renderThreadList();
   } catch (error) {
     console.error("Failed to create thread:", error);
-    showToast("發問失敗");
+    showToast(ui("發問失敗", "Failed to create thread"));
   }
 }
 
@@ -3998,7 +4021,7 @@ async function fetchThreadDetail(threadId) {
     threadsState.currentThread = response.thread;
   } catch (error) {
     console.error("Failed to fetch thread detail:", error);
-    showToast("載入討論串詳細內容失敗");
+    showToast(ui("載入討論串詳細內容失敗", "Failed to load thread details"));
   }
 }
 
@@ -4012,7 +4035,7 @@ async function createThreadReply(threadId) {
   }
 
   if (!formData.get("content")) {
-    showToast("請填寫回覆內容");
+    showToast(ui("請填寫回覆內容", "Please fill in reply content"));
     return;
   }
 
@@ -4021,13 +4044,13 @@ async function createThreadReply(threadId) {
       method: "POST",
       body: formData
     });
-    showToast("回覆成功");
+    showToast(ui("回覆成功", "Reply posted successfully"));
     clearReplyForm();
     await fetchThreadDetail(threadId);
     renderThreadDetail();
   } catch (error) {
     console.error("Failed to create reply:", error);
-    showToast("回覆失敗");
+    showToast(ui("回覆失敗", "Failed to post reply"));
   }
 }
 
@@ -4037,12 +4060,12 @@ async function acceptThreadReply(threadId, replyId) {
       method: "POST",
       body: JSON.stringify({ replyId })
     });
-    showToast("已標記最佳解答");
+    showToast(ui("已標記最佳解答", "Marked as accepted answer"));
     await fetchThreadDetail(threadId);
     renderThreadDetail();
   } catch (error) {
     console.error("Failed to accept reply:", error);
-    showToast("標記最佳解答失敗");
+    showToast(ui("標記最佳解答失敗", "Failed to mark as accepted"));
   }
 }
 
@@ -4051,14 +4074,14 @@ async function closeThread(threadId) {
     await authenticatedApiRequest(`/threads/${threadId}/close`, {
       method: "POST"
     });
-    showToast("討論串已結案");
+    showToast(ui("討論串已結案", "Thread closed"));
     await fetchThreads();
     renderThreadList();
     await fetchThreadDetail(threadId);
     renderThreadDetail();
   } catch (error) {
     console.error("Failed to close thread:", error);
-    showToast("結案失敗");
+    showToast(ui("結案失敗", "Failed to close thread"));
   }
 }
 
@@ -4079,12 +4102,12 @@ function renderThreadList() {
     <li class="thread-card ${threadsState.currentThreadId === thread.id ? 'active' : ''}" onclick="openThread('${thread.id}')">
       <div class="thread-header">
         <h4>${escapeHtml(thread.title)}</h4>
-        <span class="thread-status status-${thread.status}">${thread.status === 'open' ? '開放中' : '已結案'}</span>
+        <span class="thread-status status-${thread.status}">${thread.status === 'open' ? ui('開放中', 'Open') : ui('已結案', 'Closed')}</span>
       </div>
       <div class="thread-meta">
-        <span class="thread-subject">${escapeHtml(thread.subject || '未分類')}</span>
-        <span class="thread-author">${escapeHtml(thread.author?.name || '匿名')}</span>
-        <span class="thread-replies">${thread.replies?.length || 0} 回覆</span>
+        <span class="thread-subject">${escapeHtml(thread.subject || ui('未分類', 'Uncategorized'))}</span>
+        <span class="thread-author">${escapeHtml(thread.author?.name || ui('匿名', 'Anonymous'))}</span>
+        <span class="thread-replies">${thread.replies?.length || 0} ${ui('回覆', 'replies')}</span>
         <span class="thread-date">${new Date(thread.createdAt).toLocaleDateString()}</span>
       </div>
       <div class="thread-tags">
@@ -4101,10 +4124,10 @@ function renderThreadDetail() {
   const title = $("threadDetailTitle");
 
   if (!threadsState.currentThread) {
-    detail.innerHTML = '<p>請從左側選擇討論串查看詳細內容。</p>';
+    detail.innerHTML = `<p>${ui('請從左側選擇討論串查看詳細內容。', 'Please select a thread from the left to view details.')}</p>`;
     replies.classList.add('hidden');
     actions.classList.add('hidden');
-    title.textContent = '請選擇討論串';
+    title.textContent = ui('請選擇討論串', 'Choose a Thread');
     return;
   }
 
@@ -4118,12 +4141,12 @@ function renderThreadDetail() {
   detail.innerHTML = `
     <div class="thread-content">
       <div class="thread-info">
-        <span class="thread-author">${escapeHtml(thread.author?.name || '匿名')}</span>
+        <span class="thread-author">${escapeHtml(thread.author?.name || ui('匿名', 'Anonymous'))}</span>
         <span class="thread-date">${new Date(thread.createdAt).toLocaleDateString()}</span>
-        <span class="thread-status status-${thread.status}">${thread.status === 'open' ? '開放中' : '已結案'}</span>
+        <span class="thread-status status-${thread.status}">${thread.status === 'open' ? ui('開放中', 'Open') : ui('已結案', 'Closed')}</span>
       </div>
       <div class="thread-subject-tags">
-        <span class="thread-subject">${escapeHtml(thread.subject || '未分類')}</span>
+        <span class="thread-subject">${escapeHtml(thread.subject || ui('未分類', 'Uncategorized'))}</span>
         <div class="thread-tags">
           ${thread.tags.map(tag => `<span class="tag">${escapeHtml(tag)}</span>`).join('')}
         </div>
@@ -4132,7 +4155,7 @@ function renderThreadDetail() {
       ${thread.images && thread.images.length > 0 ? `
         <div class="thread-image-grid">
           ${thread.images.map(image => `
-            <img src="${API_BASE}${image.url}" alt="討論串圖片" onclick="window.open('${API_BASE}${image.url}', '_blank')" />
+            <img src="${API_BASE}${image.url}" alt="${ui('討論串圖片', 'Thread image')}" onclick="window.open('${API_BASE}${image.url}', '_blank')" />
           `).join('')}
         </div>
       ` : ''}
@@ -4144,18 +4167,18 @@ function renderThreadDetail() {
   replyList.innerHTML = thread.replies.map(reply => `
     <li class="reply-card ${reply.accepted ? 'accepted-reply' : ''}">
       <div class="reply-header">
-        <span class="reply-author">${escapeHtml(reply.author?.name || '匿名')}</span>
+        <span class="reply-author">${escapeHtml(reply.author?.name || ui('匿名', 'Anonymous'))}</span>
         <span class="reply-date">${new Date(reply.createdAt).toLocaleDateString()}</span>
-        ${reply.accepted ? '<span class="accepted-badge">最佳解答</span>' : ''}
+        ${reply.accepted ? `<span class="accepted-badge">${ui('最佳解答', 'Accepted Answer')}</span>` : ''}
         ${thread.author?.id === authState.user?.id && thread.status === 'open' && !reply.accepted ? `
-          <button class="accept-reply-btn small" onclick="acceptThreadReply('${thread.id}', '${reply.id}')">標記為最佳解答</button>
+          <button class="accept-reply-btn small" onclick="acceptThreadReply('${thread.id}', '${reply.id}')">${ui('標記為最佳解答', 'Mark as Accepted')}</button>
         ` : ''}
       </div>
       <div class="reply-content">${escapeHtml(reply.content).replace(/\n/g, '<br>')}</div>
       ${reply.images && reply.images.length > 0 ? `
         <div class="reply-image-grid">
           ${reply.images.map(image => `
-            <img src="${API_BASE}${image.url}" alt="回覆圖片" onclick="window.open('${API_BASE}${image.url}', '_blank')" />
+            <img src="${API_BASE}${image.url}" alt="${ui('回覆圖片', 'Reply image')}" onclick="window.open('${API_BASE}${image.url}', '_blank')" />
           `).join('')}
         </div>
       ` : ''}
@@ -4170,12 +4193,12 @@ function updateThreadFilters() {
   if (!subjectFilter || !tagFilter) return;
 
   const subjects = [...new Set(threadsState.threads.map(t => t.subject).filter(Boolean))];
-  subjectFilter.innerHTML = '<option value="">所有科目</option>' +
+  subjectFilter.innerHTML = `<option value="">${ui('所有科目', 'All Subjects')}</option>` +
     subjects.map(subject => `<option value="${escapeHtml(subject)}">${escapeHtml(subject)}</option>`).join('');
 
   const allTags = threadsState.threads.flatMap(t => t.tags || []);
   const tags = [...new Set(allTags)];
-  tagFilter.innerHTML = '<option value="">所有標籤</option>' +
+  tagFilter.innerHTML = `<option value="">${ui('所有標籤', 'All Tags')}</option>` +
     tags.map(tag => `<option value="${escapeHtml(tag)}">${escapeHtml(tag)}</option>`).join('');
 }
 

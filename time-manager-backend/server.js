@@ -1440,6 +1440,27 @@ function publicUser(user) {
   return { id: user.id, name: user.name, email: user.email };
 }
 
+function authMiddleware(req, res, next) {
+  const authHeader = String(req.headers.authorization || req.headers.Authorization || "").trim();
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : String(req.body?.token || req.query?.token || "").trim();
+
+  if (!token) {
+    return res.status(401).json({ error: "需要登入授權" });
+  }
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    req.userId = String(decoded?.id || "");
+    if (!req.userId) {
+      return res.status(401).json({ error: "無效的授權憑證" });
+    }
+    next();
+  } catch (err) {
+    console.error("authMiddleware error:", err?.message || err);
+    return res.status(401).json({ error: "無效的授權憑證" });
+  }
+}
+
 function isAdminUser(user) {
   return Boolean(user && ADMIN_EMAILS.includes(String(user.email || "").trim().toLowerCase()));
 }
