@@ -188,6 +188,7 @@ let activeMessages = [];
 let activeGroupId = null;
 let activeGroupMessages = [];
 let isShowingGroups = false; // 新增：追蹤當前顯示的是好友還是群組列表
+let currentUserIsAdmin = false;
 let typingTimer = null;
 let onlineUserIds = new Set();
 let threadsState = {
@@ -1010,7 +1011,10 @@ function mergeAppData(baseData, incomingData) {
 }
 
 function setPage(page) {
-  console.log("[admin] currentPage", page);
+  if (page === "admin" && currentUserIsAdmin !== true) {
+    showToast(ui("沒有管理員權限", "No admin permission"));
+    return;
+  }
   const previousPage = currentPage;
   currentPage = PAGE_DEFAULTS[page] ? page : "dashboard";
   if (previousPage === "friends" && currentPage !== "friends") stopFocusRoomPolling();
@@ -2898,7 +2902,7 @@ function renderGroupMessages() {
       ? `<a href="${escapeHtml(imageUrl)}" target="_blank" rel="noopener"><img class="message-image" src="${escapeHtml(imageUrl)}" alt="${ui("聊天圖片", "Chat image")}" /></a>`
       : "";
     const contentHtml = recalled ? `<p>${ui("此訊息已收回", "This message was recalled")}</p>` : message.content ? `<p>${escapeHtml(message.content)}</p>` : "";
-    const deleteBtn = isMe && !recalled ? `<button class="message-action delete-btn" data-message-id="${message.id}" type="button">${ui("刪除", "Delete")}</button>` : "";
+    const deleteBtn = !recalled ? `<button class="message-action delete-btn" data-message-id="${message.id}" type="button">${ui("刪除", "Delete")}</button>` : "";
     const recallBtn = isMe && !recalled ? `<button class="message-action recall-btn" data-message-id="${message.id}" type="button">${ui("收回", "Recall")}</button>` : "";
     return `
       <div class="message-bubble ${isMe ? "me" : "friend"}">
@@ -2948,7 +2952,7 @@ function renderMessages() {
       ? `<a href="${escapeHtml(imageUrl)}" target="_blank" rel="noopener"><img class="message-image" src="${escapeHtml(imageUrl)}" alt="${ui("聊天圖片", "Chat image")}" /></a>`
       : "";
     const contentHtml = recalled ? `<p>${ui("此訊息已收回", "This message was recalled")}</p>` : message.content ? `<p>${escapeHtml(message.content)}</p>` : "";
-    const deleteBtn = isMe && !recalled ? `<button class="message-action delete-btn" data-message-id="${message.id}" type="button">${ui("刪除", "Delete")}</button>` : "";
+    const deleteBtn = !recalled ? `<button class="message-action delete-btn" data-message-id="${message.id}" type="button">${ui("刪除", "Delete")}</button>` : "";
     const recallBtn = isMe && !recalled ? `<button class="message-action recall-btn" data-message-id="${message.id}" type="button">${ui("收回", "Recall")}</button>` : "";
     return `
       <div class="message-bubble ${isMe ? "me" : "friend"}">
@@ -3868,6 +3872,7 @@ function logout() {
   resetFriendsState();
   appData = normalizeAppData(JSON.parse(localStorage.getItem(LS_GUEST_KEY) || "{}"));
   currentTaskIdForPomodoro = localStorage.getItem(LS_FOCUS_TASK_KEY);
+  currentUserIsAdmin = false;
   updateAuthUI();
   applySettingsToTimer();
   renderAll();
@@ -3875,18 +3880,22 @@ function logout() {
 
 async function checkAdminStatus() {
   if (authState.mode !== "user") {
+    currentUserIsAdmin = false;
     hideAdminNav();
     return;
   }
   try {
     const response = await authenticatedApiRequest("/admin/me");
     if (response.isAdmin) {
+      currentUserIsAdmin = true;
       showAdminNav();
     } else {
+      currentUserIsAdmin = false;
       hideAdminNav();
     }
   } catch (err) {
     console.error("檢查管理員權限失敗:", err);
+    currentUserIsAdmin = false;
     hideAdminNav();
   }
 }
@@ -4192,8 +4201,9 @@ async function init() {
   currentTaskIdForPomodoro = localStorage.getItem(LS_FOCUS_TASK_KEY)
     || appData.tasks.find((task) => task.status === "doing")?.id
     || null;
-  applyLanguage();
   updateAuthUI();
+  await checkAdminStatus();
+  applyLanguage();
   initChatSocket();
   applySettingsToTimer();
   setPage("dashboard");
