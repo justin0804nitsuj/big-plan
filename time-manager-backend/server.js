@@ -2299,7 +2299,7 @@ app.get("/groups/:groupId", authMiddleware, (req, res) => {
     const group = getGroupById(req.params.groupId);
     if (!group) return res.status(404).json({ error: "找不到群組" });
     if (!isGroupMember(group, req.userId)) return res.status(403).json({ error: "你不是這個群組的成員" });
-    res.json({ group: publicGroup(group, req.userId) });
+    res.json(publicGroup(group, req.userId));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "取得群組資料失敗" });

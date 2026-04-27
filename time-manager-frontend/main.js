@@ -5,7 +5,7 @@ const LS_FOCUS_TASK_KEY = "timeManager_current_focus_task_v2";
 
 const LANGUAGE_ZH = "zh-Hant";
 const LANGUAGE_EN = "en";
-const PAGE_ORDER = ["dashboard", "focus", "tasks", "learning", "friends", "groups", "threads", "ai", "settings"];
+const PAGE_ORDER = ["dashboard", "focus", "tasks", "learning", "friends", "groups", "threads", "ai", "admin", "settings"];
 const QUICK_MESSAGES = [
   "我要開始專注 25 分鐘",
   "一起讀書嗎？",
@@ -129,6 +129,18 @@ const PAGE_DEFAULTS = {
       subtitle: "The app starts with mock responses; later the AI request can be wired to a backend or OpenAI API."
     }
   },
+  admin: {
+    zh: {
+      title: "管理員面板",
+      eyebrow: "管理員",
+      subtitle: "管理員專用功能，只有授權使用者可見。"
+    },
+    en: {
+      title: "Admin Panel",
+      eyebrow: "Admin",
+      subtitle: "Admin-only tools and management functions for authorized users."
+    }
+  },
   settings: {
     zh: {
       title: "設定與資料",
@@ -249,6 +261,7 @@ function pageLabel(page) {
     groups: ui("群組", "Groups"),
     threads: ui("討論區", "Threads"),
     ai: ui("AI 助理", "AI Assistant"),
+    admin: ui("管理員", "Admin"),
     settings: ui("設定", "Settings")
   }[page] || page;
 }
@@ -997,6 +1010,7 @@ function mergeAppData(baseData, incomingData) {
 }
 
 function setPage(page) {
+  console.log("[admin] currentPage", page);
   const previousPage = currentPage;
   currentPage = PAGE_DEFAULTS[page] ? page : "dashboard";
   if (previousPage === "friends" && currentPage !== "friends") stopFocusRoomPolling();
@@ -2551,36 +2565,6 @@ function sendGroupChatMessage() {
   if (input) input.value = "";
 }
 
-async function handleGroupImageUpload(file) {
-  if (!groupsState.selectedGroupId) return alert(ui("請先選擇群組。", "Choose a group first."));
-  if (authState.mode !== "user") return alert(ui("請先登入。", "Please sign in first."));
-  if (!file) return;
-  const allowedTypes = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
-  if (!allowedTypes.has(file.type)) return alert(ui("只允許 JPG、PNG、WebP 或 GIF 圖片。", "Only JPG, PNG, WebP, or GIF images are allowed."));
-  if (file.size > 10 * 1024 * 1024) return alert(ui("圖片大小不可超過 10MB。", "Image size cannot exceed 10MB."));
-
-  const form = new FormData();
-  form.append("image", file);
-  try {
-    const res = await fetch(`${API_BASE}/groups/${encodeURIComponent(groupsState.selectedGroupId)}/upload-image`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${authState.token}` },
-      body: form
-    });
-    if (!res.ok) {
-      const errorJson = await res.json().catch(() => ({}));
-      throw new Error(errorJson.error || `HTTP ${res.status}`);
-    }
-    const data = await res.json();
-    if (data.message) {
-      groupsState.groupMessages.push(data.message);
-      renderGroupChat();
-    }
-  } catch (err) {
-    alert(ui(`圖片上傳失敗：${err.message}`, `Image upload failed: ${err.message}`));
-  }
-}
-
 function selectFriend(friendId) {
   const changed = friendsState.selectedFriendId !== friendId;
   if (changed) {
@@ -2607,6 +2591,7 @@ async function fetchFriends() {
   }
   const data = await authenticatedApiRequest("/friends/list");
   friendsState.friends = Array.isArray(data.friends) ? data.friends : [];
+  console.log("[groups] friends", friendsState.friends);
   if (friendsState.selectedFriendId && !friendsState.friends.some((friend) => friend.id === friendsState.selectedFriendId)) {
     friendsState.selectedFriendId = null;
     friendsState.messages = [];
@@ -2812,17 +2797,18 @@ async function sendGroupMessage(groupId, content, type = "text") {
 }
 
 async function handleGroupImageUpload(file) {
-  if (!activeGroupId) return alert(ui("請先選擇群組。", "Choose a group first."));
-  if (authState.mode !== "user") return alert(ui("請先登入。", "Please sign in first."));
+  const groupId = groupsState.selectedGroupId || activeGroupId;
+  if (!groupId) return showToast(ui("請先選擇群組。", "Choose a group first."));
+  if (authState.mode !== "user") return showToast(ui("請先登入。", "Please sign in first."));
   if (!file) return;
   const allowedTypes = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
-  if (!allowedTypes.has(file.type)) return alert(ui("只允許 JPG、PNG、WebP 或 GIF 圖片。", "Only JPG, PNG, WebP, or GIF images are allowed."));
-  if (file.size > 10 * 1024 * 1024) return alert(ui("圖片大小不可超過 10MB。", "Image size cannot exceed 10MB."));
+  if (!allowedTypes.has(file.type)) return showToast(ui("只允許 JPG、PNG、WebP 或 GIF 圖片。", "Only JPG, PNG, WebP, or GIF images are allowed."));
+  if (file.size > 10 * 1024 * 1024) return showToast(ui("圖片大小不可超過 10MB。", "Image size cannot exceed 10MB."));
 
   const form = new FormData();
   form.append("image", file);
   try {
-    const res = await fetch(`${API_BASE}/groups/${encodeURIComponent(activeGroupId)}/upload-image`, {
+    const res = await fetch(`${API_BASE}/groups/${encodeURIComponent(groupId)}/upload-image`, {
       method: "POST",
       headers: { Authorization: `Bearer ${authState.token}` },
       body: form
@@ -2832,12 +2818,20 @@ async function handleGroupImageUpload(file) {
       throw new Error(errorJson.error || `HTTP ${res.status}`);
     }
     const data = await res.json();
+    console.log("[groups] upload image response", data.message);
     if (data.message) {
-      addOrUpdateGroupMessage(data.message);
-      renderGroupMessages();
+      if (groupId === activeGroupId) {
+        addOrUpdateGroupMessage(data.message);
+        renderGroupMessages();
+      } else {
+        groupsState.groupMessages = groupsState.groupMessages || [];
+        groupsState.groupMessages.push(data.message);
+        renderGroupChat();
+      }
     }
   } catch (err) {
-    alert(ui(`圖片上傳失敗：${err.message}`, `Image upload failed: ${err.message}`));
+    showToast(ui(`群組圖片上傳失敗：${err.message}`, `Group image upload failed: ${err.message}`));
+    console.error("群組圖片上傳失敗:", err);
   }
 }
 
@@ -3536,9 +3530,12 @@ async function createGroup() {
   }
 }
 
-function openGroup(groupId) {
+async function openGroup(groupId) {
+  console.log("[groups] openGroup", groupId);
   groupsState.selectedGroupId = groupId;
-  fetchGroupDetail(groupId);
+  activeGroupId = groupId;
+  await Promise.all([fetchFriends(), fetchGroupDetail(groupId)]);
+  await joinGroup(groupId);
   renderGroupsContent();
 }
 
@@ -3548,11 +3545,19 @@ async function fetchGroupDetail(groupId) {
     const response = await fetch(`${API_BASE}/groups/${encodeURIComponent(groupId)}`, {
       headers: { Authorization: `Bearer ${authState.token}` }
     });
-    if (!response.ok) throw new Error("載入群組詳情失敗");
-    const data = await response.json();
-    groupsState.groupMembers = data.members || [];
+    if (!response.ok) {
+      const errorJson = await response.json().catch(() => ({}));
+      throw new Error(errorJson.error || `HTTP ${response.status}`);
+    }
+    const group = await response.json();
+    console.log("[groups] group detail", group);
+    groupsState.groupDetail = group;
+    groupsState.groupMembers = Array.isArray(group.members) ? group.members : [];
     await fetchGroupMessages(groupId);
   } catch (err) {
+    groupsState.groupDetail = null;
+    groupsState.groupMembers = [];
+    showToast(ui(`群組詳情載入失敗：${err.message}`, `Failed to load group detail: ${err.message}`));
     console.error("載入群組詳情失敗:", err);
   }
 }
@@ -3577,7 +3582,7 @@ async function fetchGroupMessages(groupId) {
 }
 
 async function inviteFriendToGroup(groupId, friendId) {
-  if (!groupId || !friendId) return alert(ui("請選擇群組和好友。", "Please select a group and friend."));
+  if (!groupId || !friendId) return showToast(ui("請選擇群組和好友。", "Please select a group and friend."));
   try {
     const response = await fetch(`${API_BASE}/groups/${encodeURIComponent(groupId)}/invite`, {
       method: "POST",
@@ -3585,14 +3590,17 @@ async function inviteFriendToGroup(groupId, friendId) {
         "Content-Type": "application/json",
         Authorization: `Bearer ${authState.token}`
       },
-      body: JSON.stringify({ userId: friendId })
+      body: JSON.stringify({ friendId })
     });
-    if (!response.ok) throw new Error("邀請好友失敗");
+    if (!response.ok) {
+      const errorJson = await response.json().catch(() => ({}));
+      throw new Error(errorJson.error || `HTTP ${response.status}`);
+    }
     showToast(ui("好友邀請已送出", "Friend invitation sent"));
-    await fetchGroupDetail(groupId);
-    renderGroupMembers();
+    await openGroup(groupId);
   } catch (err) {
-    alert(ui(`邀請好友失敗：${err.message}`, `Invite friend failed: ${err.message}`));
+    showToast(ui(`邀請好友失敗：${err.message}`, `Invite friend failed: ${err.message}`));
+    console.error("群組邀請失敗:", err);
   }
 }
 
@@ -3671,17 +3679,25 @@ function renderGroupMembers(group) {
     return;
   }
 
+  const activeGroup = group || groupsState.groupDetail || { members: groupsState.groupMembers };
   title.textContent = ui("群組成員", "Group Members");
-  if (!groupsState.groupMembers.length) {
-    list.innerHTML = `<p class="empty-state">${ui("載入中...", "Loading...")}</p>`;
-    inviteSelect.innerHTML = `<option value="">${ui("載入中...", "Loading...")}</option>`;
+
+  if (!Array.isArray(activeGroup.members)) {
+    list.innerHTML = `<p class="empty-state">${ui("成員資料載入失敗", "Failed to load member data")}</p>`;
+    inviteSelect.innerHTML = `<option value="">${ui("成員資料載入失敗", "Failed to load member data")}</option>`;
+    return;
+  }
+
+  if (!activeGroup.members.length) {
+    list.innerHTML = `<p class="empty-state">${ui("尚無成員。", "No members yet.")}</p>`;
+    renderGroupInviteOptions(activeGroup, friendsState.friends);
     return;
   }
 
   const currentUserId = authState.user?.id;
-  const isOwner = groupsState.groupMembers.find(m => m.id === currentUserId)?.isOwner;
+  const isOwner = activeGroup.members.find((m) => m.id === currentUserId)?.isOwner;
 
-  list.innerHTML = groupsState.groupMembers.map((member) => `
+  list.innerHTML = activeGroup.members.map((member) => `
     <div class="group-member-item">
       <div>
         <strong>${escapeHtml(member.name)}</strong>
@@ -3695,11 +3711,21 @@ function renderGroupMembers(group) {
     btn.onclick = () => removeGroupMember(groupsState.selectedGroupId, btn.dataset.memberId);
   });
 
-  // 更新邀請好友下拉選單
-  const memberIds = new Set(groupsState.groupMembers.map(m => m.id));
-  const availableFriends = friendsState.friends.filter(f => !memberIds.has(f.id));
+  renderGroupInviteOptions(activeGroup, friendsState.friends);
+}
+
+function renderGroupInviteOptions(group, friends) {
+  const inviteSelect = $("inviteFriendSelect");
+  if (!inviteSelect) return;
+  if (!group || !Array.isArray(group.members)) {
+    inviteSelect.innerHTML = `<option value="">${ui("成員資料載入失敗", "Failed to load member data")}</option>`;
+    return;
+  }
+
+  const memberIds = new Set(group.members.map((member) => member.id));
+  const availableFriends = Array.isArray(friends) ? friends.filter((friend) => !memberIds.has(friend.id)) : [];
   inviteSelect.innerHTML = `<option value="">${ui("選擇好友...", "Choose a friend...")}</option>` +
-    availableFriends.map(f => `<option value="${escapeHtml(f.id)}">${escapeHtml(f.originalName || f.name)}</option>`).join("");
+    availableFriends.map((friend) => `<option value="${escapeHtml(friend.id)}">${escapeHtml(friend.originalName || friend.name)}</option>`).join("");
 }
 
 function renderGroupChat() {
