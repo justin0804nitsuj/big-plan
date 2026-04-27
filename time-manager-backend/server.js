@@ -1318,7 +1318,7 @@ function attachThreadRoutes() {
       res.status(500).json({ error: "關閉或開啟討論串失敗" });
     }
   });
-});
+};
 
 attachThreadRoutes();
 
