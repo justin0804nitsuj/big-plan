@@ -12,21 +12,25 @@ require("dotenv").config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || "PLEASE_CHANGE_THIS_SECRET_KEY";
+const ADMIN_EMAILS = String(process.env.ADMIN_EMAILS || "").split(",").map((email) => email.trim().toLowerCase()).filter(Boolean);
+const ENABLE_ADMIN_DANGER = String(process.env.ENABLE_ADMIN_DANGER || "false").toLowerCase() === "true";
 
-const DB_DIR = path.join(__dirname, "db");
-const USERS_FILE = path.join(DB_DIR, "users.json");
-const MESSAGES_FILE = path.join(DB_DIR, "messages.json");
-const SHARED_TASKS_FILE = path.join(DB_DIR, "sharedTasks.json");
-const FOCUS_ROOMS_FILE = path.join(DB_DIR, "focusRooms.json");
-const GROUPS_FILE = path.join(DB_DIR, "groups.json");
-const USERDATA_DIR = path.join(DB_DIR, "userdata");
-const UPLOADS_DIR = path.join(__dirname, "uploads");
-const CHAT_UPLOADS_DIR = path.join(UPLOADS_DIR, "chat");
-const THREADS_FILE = path.join(DB_DIR, "threads.json");
-const THREAD_REPLIES_FILE = path.join(DB_DIR, "threadReplies.json");
+const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, "db");
+const USERS_FILE = path.join(DATA_DIR, "users.json");
+const MESSAGES_FILE = path.join(DATA_DIR, "messages.json");
+const SHARED_TASKS_FILE = path.join(DATA_DIR, "sharedTasks.json");
+const FOCUS_ROOMS_FILE = path.join(DATA_DIR, "focusRooms.json");
+const GROUPS_FILE = path.join(DATA_DIR, "groups.json");
+const USERDATA_DIR = path.join(DATA_DIR, "userdata");
+const UPLOAD_DIR = process.env.UPLOAD_DIR ? path.resolve(process.env.UPLOAD_DIR) : path.join(__dirname, "uploads");
+const UPLOADS_DIR = UPLOAD_DIR;
+const CHAT_UPLOADS_DIR = path.join(UPLOAD_DIR, "chat");
+const THREADS_FILE = path.join(DATA_DIR, "threads.json");
+const THREAD_REPLIES_FILE = path.join(DATA_DIR, "threadReplies.json");
 
-ensureDir(DB_DIR);
+ensureDir(DATA_DIR);
 ensureDir(USERDATA_DIR);
+ensureDir(UPLOAD_DIR);
 ensureDir(CHAT_UPLOADS_DIR);
 ensureFile(USERS_FILE, []);
 ensureFile(MESSAGES_FILE, []);
@@ -1436,17 +1440,19 @@ function publicUser(user) {
   return { id: user.id, name: user.name, email: user.email };
 }
 
-function authMiddleware(req, res, next) {
-  try {
-    const header = req.headers.authorization || "";
-    const [type, token] = header.split(" ");
-    if (type !== "Bearer" || !token) return res.status(401).json({ error: "請先登入" });
-    const decoded = jwt.verify(token, JWT_SECRET);
-    req.userId = decoded.id;
+function isAdminUser(user) {
+  return Boolean(user && ADMIN_EMAILS.includes(String(user.email || "").trim().toLowerCase()));
+}
+
+function adminMiddleware(req, res, next) {
+  authMiddleware(req, res, () => {
+    const users = loadUsers();
+    const user = getUserById(users, req.userId);
+    if (!user || !isAdminUser(user)) {
+      return res.status(403).json({ error: "需要管理員權限" });
+    }
     next();
-  } catch (_) {
-    res.status(401).json({ error: "登入狀態已失效，請重新登入" });
-  }
+  });
 }
 
 function todayKey() {
@@ -2349,6 +2355,168 @@ app.post("/groups/:groupId/remove-member", authMiddleware, (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "移除群組成員失敗" });
+  }
+});
+
+app.get("/admin/me", authMiddleware, (req, res) => {
+  try {
+    const users = loadUsers();
+    const user = getUserById(users, req.userId);
+    if (!user) return res.status(404).json({ error: "找不到使用者" });
+    if (!isAdminUser(user)) return res.status(403).json({ error: "需要管理員權限" });
+    res.json({ user: publicUser(user) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "取得管理員資訊失敗" });
+  }
+});
+
+app.get("/admin/users", adminMiddleware, (req, res) => {
+  try {
+    const users = loadUsers();
+    res.json({ users: users.map((user) => ({
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      createdAt: user.createdAt,
+      friendsCount: (user.friends || []).length,
+      incomingRequestsCount: (user.incomingRequests || []).length,
+      outgoingRequestsCount: (user.outgoingRequests || []).length
+    })) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "取得使用者列表失敗" });
+  }
+});
+
+app.get("/admin/users/:userId", adminMiddleware, (req, res) => {
+  try {
+    const users = loadUsers();
+    const user = getUserById(users, req.params.userId);
+    if (!user) return res.status(404).json({ error: "找不到使用者" });
+    const userData = loadUserData(user.id);
+    const groups = loadGroups().filter((group) => isGroupMember(group, user.id));
+    const threads = loadThreads().filter((thread) => thread.authorId === user.id);
+    res.json({
+      user: publicUser(user),
+      stats: {
+        tasks: Array.isArray(userData.tasks) ? userData.tasks.length : 0,
+        focusSessions: Array.isArray(userData.focusSessions) ? userData.focusSessions.length : 0,
+        friends: (user.friends || []).length,
+        groups: groups.length,
+        threads: threads.length
+      }
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "取得使用者資料失敗" });
+  }
+});
+
+app.post("/admin/users/:userId/update", adminMiddleware, (req, res) => {
+  try {
+    const name = String(req.body?.name || "").trim();
+    const email = String(req.body?.email || "").trim().toLowerCase();
+    if (!name || !validateEmail(email)) return res.status(400).json({ error: "請提供有效的名稱與 Email" });
+    const users = loadUsers();
+    const user = getUserById(users, req.params.userId);
+    if (!user) return res.status(404).json({ error: "找不到使用者" });
+    if (users.some((item) => item.id !== user.id && item.email === email)) {
+      return res.status(400).json({ error: "此 Email 已被使用" });
+    }
+    user.name = name;
+    user.email = email;
+    saveUsers(users);
+    res.json({ success: true, user: publicUser(user) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "更新使用者資料失敗" });
+  }
+});
+
+app.post("/admin/users/:userId/reset-data", adminMiddleware, (req, res) => {
+  try {
+    const users = loadUsers();
+    const user = getUserById(users, req.params.userId);
+    if (!user) return res.status(404).json({ error: "找不到使用者" });
+    saveUserData(user.id, getEmptyUserData());
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "重設使用者資料失敗" });
+  }
+});
+
+app.delete("/admin/users/:userId", adminMiddleware, (req, res) => {
+  try {
+    const users = loadUsers();
+    const user = getUserById(users, req.params.userId);
+    if (!user) return res.status(404).json({ error: "找不到使用者" });
+    const confirmSelfDelete = req.body?.confirmSelfDelete === true || req.body?.confirmSelfDelete === "true";
+    if (user.id === req.userId && !confirmSelfDelete) {
+      return res.status(400).json({ error: "禁止刪除自己，除非確認 self delete" });
+    }
+    const filtered = users.filter((item) => item.id !== user.id);
+    filtered.forEach((item) => {
+      item.friends = (item.friends || []).filter((id) => id !== user.id);
+      item.incomingRequests = (item.incomingRequests || []).filter((id) => id !== user.id);
+      item.outgoingRequests = (item.outgoingRequests || []).filter((id) => id !== user.id);
+      if (item.friendMeta && typeof item.friendMeta === "object") {
+        delete item.friendMeta[user.id];
+      }
+    });
+    saveUsers(filtered);
+    const dataFile = getUserDataFile(user.id);
+    if (fs.existsSync(dataFile)) fs.unlinkSync(dataFile);
+    const groups = loadGroups().map((group) => {
+      if (group.memberIds.includes(user.id)) {
+        group.memberIds = group.memberIds.filter((id) => id !== user.id);
+      }
+      if (group.ownerId === user.id) {
+        group.ownerId = group.memberIds[0] || "";
+      }
+      return group;
+    }).filter((group) => group.memberIds.length > 0);
+    saveGroups(groups);
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "刪除使用者失敗" });
+  }
+});
+
+app.post("/admin/delete-all-test-data", adminMiddleware, (req, res) => {
+  try {
+    if (!ENABLE_ADMIN_DANGER) return res.status(403).json({ error: "危險操作未啟用" });
+    const confirmText = String(req.body?.confirmText || "").trim();
+    if (confirmText !== "DELETE ALL TEST DATA") {
+      return res.status(400).json({ error: "請輸入 DELETE ALL TEST DATA" });
+    }
+    saveUsers([]);
+    safeWriteJSON(MESSAGES_FILE, []);
+    safeWriteJSON(SHARED_TASKS_FILE, []);
+    safeWriteJSON(FOCUS_ROOMS_FILE, []);
+    safeWriteJSON(GROUPS_FILE, []);
+    safeWriteJSON(THREADS_FILE, []);
+    safeWriteJSON(THREAD_REPLIES_FILE, []);
+    if (fs.existsSync(USERDATA_DIR)) {
+      fs.readdirSync(USERDATA_DIR).forEach((file) => {
+        const fullPath = path.join(USERDATA_DIR, file);
+        if (String(file).endsWith(".json") && fs.existsSync(fullPath)) {
+          fs.unlinkSync(fullPath);
+        }
+      });
+    }
+    if (fs.existsSync(CHAT_UPLOADS_DIR)) {
+      fs.readdirSync(CHAT_UPLOADS_DIR).forEach((file) => {
+        const fullPath = path.join(CHAT_UPLOADS_DIR, file);
+        if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath);
+      });
+    }
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "刪除所有測試資料失敗" });
   }
 });
 
