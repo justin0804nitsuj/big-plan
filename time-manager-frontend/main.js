@@ -826,6 +826,7 @@ function applyLanguage() {
   setText("#shortcutNextLabel", ui("切換到下一個左側分頁", "Switch to the next left tab"));
   setText("#shortcutPrevLabel", ui("切換到上一個左側分頁", "Switch to the previous left tab"));
   setText("#shortcutSettingsLabel", ui("直接切換到設定", "Jump directly to Settings"));
+  setText("#shortcutFriendsLabel", ui("長按 F：顯示在線好友列表", "Hold F to show online friends list"));
 
   setText("#page-threads .thread-form-panel .eyebrow", ui("發問", "Ask"));
   setText("#page-threads .thread-form-panel h3", ui("提出新問題", "Ask a New Question"));
@@ -2528,14 +2529,6 @@ function updateChatPresenceLabel() {
 function shouldIgnoreFriendShortcut() {
   const tag = document.activeElement?.tagName?.toLowerCase();
   return ["input", "textarea", "select"].includes(tag) || document.activeElement?.isContentEditable;
-}
-
-function toggleOnlineFriendsOverlay() {
-  if (isOnlineOverlayVisible) {
-    hideOnlineFriendsOverlay();
-  } else {
-    showOnlineFriendsOverlay();
-  }
 }
 
 function showOnlineFriendsOverlay() {
@@ -4338,9 +4331,16 @@ function bindEvents() {
   document.addEventListener("keydown", (event) => {
     if (event.key.toLowerCase() !== "f") return;
     if (event.ctrlKey || event.altKey || event.metaKey) return;
+    if (event.repeat) return;
     if (shouldIgnoreFriendShortcut()) return;
+
     event.preventDefault();
-    toggleOnlineFriendsOverlay();
+    showOnlineFriendsOverlay();
+  });
+
+  document.addEventListener("keyup", (event) => {
+    if (event.key.toLowerCase() !== "f") return;
+    hideOnlineFriendsOverlay();
   });
 }
 
