@@ -1790,6 +1790,8 @@ app.post("/friends/request", authMiddleware, (req, res) => {
     user.outgoingRequests = uniqueStrings([...user.outgoingRequests, friend.id]);
     friend.incomingRequests = uniqueStrings([...friend.incomingRequests, user.id]);
     saveUsers(users);
+    emitPrivateEvent(friend.id, "friend:request:new", { from: user.id });
+    emitToUsers([user.id, friend.id], "friends:updated", {});
     res.json({ success: true });
   } catch (err) {
     console.error(err);
@@ -1812,6 +1814,8 @@ app.post("/friends/accept", authMiddleware, (req, res) => {
     user.friends = uniqueStrings([...user.friends, friend.id]);
     friend.friends = uniqueStrings([...friend.friends, user.id]);
     saveUsers(users);
+    emitToUsers([user.id, friend.id], "friend:request:accepted", { friendId: friend.id, userId: user.id });
+    emitToUsers([user.id, friend.id], "friends:updated", {});
     res.json({ success: true });
   } catch (err) {
     console.error(err);
@@ -1832,6 +1836,8 @@ app.post("/friends/reject", authMiddleware, (req, res) => {
     user.incomingRequests = user.incomingRequests.filter((id) => id !== friend.id);
     friend.outgoingRequests = friend.outgoingRequests.filter((id) => id !== user.id);
     saveUsers(users);
+    emitToUsers([user.id, friend.id], "friend:request:rejected", { friendId: friend.id, userId: user.id });
+    emitToUsers([user.id, friend.id], "friends:updated", {});
     res.json({ success: true });
   } catch (err) {
     console.error(err);
@@ -2034,6 +2040,8 @@ app.post("/tasks/share", authMiddleware, (req, res) => {
     const shares = loadSharedTasks();
     shares.push(share);
     saveSharedTasks(shares);
+    emitPrivateEvent(friendId, "shared-task:new", { shareId: share.id, senderId: req.userId });
+    emitToUsers([req.userId, friendId], "friends:updated", {});
     res.json({ success: true, share });
   } catch (err) {
     console.error(err);
@@ -2078,6 +2086,8 @@ app.post("/tasks/shared/accept", authMiddleware, (req, res) => {
     share.status = "accepted";
     share.respondedAt = new Date().toISOString();
     saveSharedTasks(shares);
+    emitPrivateEvent(share.senderId, "shared-task:accepted", { shareId: share.id, receiverId: req.userId });
+    emitToUsers([req.userId, share.senderId], "friends:updated", {});
     res.json({ success: true, task: taskCopy });
   } catch (err) {
     console.error(err);
@@ -2095,6 +2105,8 @@ app.post("/tasks/shared/reject", authMiddleware, (req, res) => {
     share.status = "rejected";
     share.respondedAt = new Date().toISOString();
     saveSharedTasks(shares);
+    emitPrivateEvent(share.senderId, "shared-task:rejected", { shareId: share.id, receiverId: req.userId });
+    emitToUsers([req.userId, share.senderId], "friends:updated", {});
     res.json({ success: true });
   } catch (err) {
     console.error(err);
@@ -2124,6 +2136,7 @@ app.post("/focus-room/create", authMiddleware, (req, res) => {
     const rooms = loadFocusRooms();
     rooms.push(room);
     saveFocusRooms(rooms);
+    emitFocusRoomUpdated(room);
     res.json({ success: true, room });
   } catch (err) {
     console.error(err);
@@ -2144,6 +2157,7 @@ app.post("/focus-room/invite", authMiddleware, (req, res) => {
     if (room.status === "ended") return res.status(400).json({ error: "專注房間已結束" });
     room.invitedUserIds = uniqueStrings([...(room.invitedUserIds || []), friendId]);
     saveFocusRooms(rooms);
+    emitFocusRoomUpdated(room);
     res.json({ success: true, room });
   } catch (err) {
     console.error(err);
@@ -2164,6 +2178,7 @@ app.post("/focus-room/join", authMiddleware, (req, res) => {
     room.participantIds = uniqueStrings([...(room.participantIds || []), req.userId]);
     room.invitedUserIds = (room.invitedUserIds || []).filter((id) => id !== req.userId);
     saveFocusRooms(rooms);
+    emitFocusRoomUpdated(room);
     res.json({ success: true, room });
   } catch (err) {
     console.error(err);
@@ -2180,6 +2195,7 @@ function mutateFocusRoom(req, res, mutator) {
     if (!room.participantIds?.includes(req.userId)) return res.status(403).json({ error: "請先加入專注房間" });
     mutator(room);
     saveFocusRooms(rooms);
+    emitFocusRoomUpdated(room);
     res.json({ success: true, room });
   } catch (err) {
     console.error(err);
@@ -2625,6 +2641,23 @@ function addOnlineSocket(userId, socketId) {
   onlineUsers.set(userId, sockets);
 }
 
+function emitPrivateEvent(userId, event, payload) {
+  if (!userId || !event || typeof io === "undefined") return;
+  io.to("user_" + String(userId)).emit(event, payload);
+}
+
+function emitToUsers(userIds, event, payload) {
+  if (!Array.isArray(userIds) || !userIds.length) return;
+  const uniqueIds = Array.from(new Set(userIds.map((id) => String(id)))).filter(Boolean);
+  uniqueIds.forEach((userId) => emitPrivateEvent(userId, event, payload));
+}
+
+function emitFocusRoomUpdated(room) {
+  if (!room) return;
+  const userIds = [room.hostId, ...(room.participantIds || []), ...(room.invitedUserIds || [])];
+  emitToUsers(userIds, "focus-room:updated", room);
+}
+
 function removeOnlineSocket(userId, socketId) {
   const sockets = onlineUsers.get(userId);
   if (!sockets) return false;
@@ -2661,10 +2694,11 @@ io.use((socket, next) => {
 
 io.on("connection", (socket) => {
   addOnlineSocket(socket.userId, socket.id);
+  socket.join("user_" + socket.userId);
   Array.from(onlineUsers.keys()).forEach((userId) => {
     socket.emit("presence:update", { userId, online: true });
   });
-  io.emit("presence:update", { userId: socket.userId, online: true });
+  io.to("user_" + socket.userId).emit("presence:update", { userId: socket.userId, online: true });
 
   socket.on("join:dm", ({ friendId } = {}) => {
     const result = requireSocketFriend(socket, String(friendId || ""));

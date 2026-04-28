@@ -191,6 +191,10 @@ let isShowingGroups = false; // 新增：追蹤當前顯示的是好友還是群
 let currentUserIsAdmin = false;
 let typingTimer = null;
 let onlineUserIds = new Set();
+let onlineFriends = [];
+let isOnlineOverlayVisible = false;
+let friendsRealtimeTimer = null;
+let activeFocusFriendId = null;
 let threadsState = {
   threads: [],
   currentThreadId: null,
@@ -325,6 +329,12 @@ function escapeHtml(str) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+function resolveAssetUrl(url) {
+  if (!url) return "";
+  if (url.startsWith("http")) return String(url);
+  return API_BASE.replace(/\/$/, "") + "/" + String(url).replace(/^\//, "");
 }
 
 function normalizeTags(tags) {
@@ -870,13 +880,6 @@ function switchPageByOffset(offset) {
 function handleKeyboardShortcuts(event) {
   if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.isComposing) return;
 
-  if (event.key === "Tab") {
-    if (!$("authModal")?.classList.contains("hidden")) return;
-    event.preventDefault();
-    switchPageByOffset(event.shiftKey ? -1 : 1);
-    return;
-  }
-
   if (event.key === "Escape") {
     event.preventDefault();
     $("authModal")?.classList.add("hidden");
@@ -1017,7 +1020,13 @@ function setPage(page) {
   }
   const previousPage = currentPage;
   currentPage = PAGE_DEFAULTS[page] ? page : "dashboard";
-  if (previousPage === "friends" && currentPage !== "friends") stopFocusRoomPolling();
+  if (previousPage === "friends" && currentPage !== "friends") {
+    stopFocusRoomPolling();
+    stopFriendsRealtimePolling();
+  }
+  if (currentPage === "friends") {
+    startFriendsRealtimePolling();
+  }
   document.querySelectorAll(".page").forEach((section) => {
     section.classList.toggle("active", section.id === `page-${currentPage}`);
   });
@@ -2413,11 +2422,46 @@ function connectChatSocket() {
   chatSocket.on("typing:update", ({ userId, typing } = {}) => {
     showTypingIndicator(userId, typing);
   });
-  chatSocket.on("presence:update", ({ userId, online } = {}) => {
+  chatSocket.on("presence:update", (payload = {}) => {
+    const { userId, online } = payload;
     if (!userId) return;
     if (online) onlineUserIds.add(userId);
     else onlineUserIds.delete(userId);
+    updateOnlineFriends(payload);
+    renderOnlineFriendsOverlay();
+    if (currentPage === "friends") renderFriends();
     updateChatPresenceLabel();
+  });
+  chatSocket.on("friend:request:new", () => {
+    refreshFriendsRealtime();
+  });
+  chatSocket.on("friend:request:accepted", () => {
+    refreshFriendsRealtime();
+    showToast(ui("好友請求已接受。", "Friend request accepted."));
+  });
+  chatSocket.on("friend:request:rejected", () => {
+    refreshFriendsRealtime();
+    showToast(ui("好友請求被拒絕。", "Friend request rejected."));
+  });
+  chatSocket.on("friends:updated", () => {
+    refreshFriendsRealtime();
+  });
+  chatSocket.on("shared-task:new", () => {
+    refreshFriendsRealtime();
+    showToast(ui("您有新的共享任務。", "You have a new shared task."));
+  });
+  chatSocket.on("shared-task:accepted", () => {
+    refreshFriendsRealtime();
+    showToast(ui("共享任務已被接受。", "Shared task accepted."));
+  });
+  chatSocket.on("shared-task:rejected", () => {
+    refreshFriendsRealtime();
+    showToast(ui("共享任務已被拒絕。", "Shared task rejected."));
+  });
+  chatSocket.on("focus-room:updated", (room) => {
+    updateActiveFocusRoom(room);
+    refreshFriendsRealtime();
+    showToast(ui("專注房間已更新。", "Focus room updated."));
   });
   chatSocket.on("chat:error", (payload) => {
     showToast(payload?.error || ui("聊天連線發生問題", "Chat connection issue"));
@@ -2469,9 +2513,7 @@ function recallMessage(messageId) {
 }
 
 function getMessageImageUrl(imageUrl) {
-  if (!imageUrl) return "";
-  if (/^(https?:|data:|blob:)/.test(imageUrl)) return imageUrl;
-  return `${API_BASE}${imageUrl.startsWith("/") ? "" : "/"}${imageUrl}`;
+  return resolveAssetUrl(imageUrl);
 }
 
 function updateChatPresenceLabel() {
@@ -2481,6 +2523,96 @@ function updateChatPresenceLabel() {
   const online = friendId && onlineUserIds.has(friendId);
   label.textContent = online ? ui("在線", "Online") : ui("離線", "Offline");
   label.classList.toggle("online", Boolean(online));
+}
+
+function shouldIgnoreTabOverlay() {
+  const tag = document.activeElement?.tagName?.toLowerCase();
+  return ["input", "textarea", "select"].includes(tag) || document.activeElement?.isContentEditable;
+}
+
+function showOnlineFriendsOverlay() {
+  if (isOnlineOverlayVisible) return;
+  const overlay = $("onlineFriendsOverlay");
+  if (!overlay) return;
+  if (shouldIgnoreTabOverlay()) return;
+  isOnlineOverlayVisible = true;
+  overlay.classList.remove("hidden");
+  renderOnlineFriendsOverlay();
+}
+
+function hideOnlineFriendsOverlay() {
+  const overlay = $("onlineFriendsOverlay");
+  if (!overlay) return;
+  isOnlineOverlayVisible = false;
+  overlay.classList.add("hidden");
+}
+
+function updateOnlineFriends(payload = {}) {
+  const userId = String(payload.userId || "");
+  const online = Boolean(payload.online);
+  if (!userId) return;
+  if (online) {
+    onlineUserIds.add(userId);
+  } else {
+    onlineUserIds.delete(userId);
+  }
+  onlineFriends = friendsState.friends.filter((friend) => onlineUserIds.has(friend.id));
+}
+
+function renderOnlineFriendsOverlay() {
+  const overlay = $("onlineFriendsOverlay");
+  const countLabel = $("onlineFriendsCount");
+  const list = $("onlineFriendsList");
+  if (!overlay || !countLabel || !list) return;
+
+  const activeFriends = friendsState.friends.filter((friend) => onlineUserIds.has(friend.id) || friend.online);
+
+  countLabel.textContent = String(activeFriends.length);
+  list.innerHTML = activeFriends.length
+    ? activeFriends.map((friend) => `
+        <li class="online-friend-item">
+          <strong>${escapeHtml(friend.originalName || friend.name)}</strong>
+          <span>${ui("在線中", "Online")}</span>
+        </li>
+      `).join("")
+    : `<li class="online-friend-item empty-state">${ui("目前沒有在線好友。", "No online friends.")}</li>`;
+}
+
+function refreshFriendsRealtime() {
+  if (authState.mode !== "user") return;
+  Promise.allSettled([
+    fetchFriends(),
+    fetchFriendRequests(),
+    fetchIncomingSharedTasks(),
+    activeChatFriendId ? fetchMessages(activeChatFriendId) : Promise.resolve(),
+    activeFocusFriendId ? pollFocusRoom(activeFocusFriendId, true) : Promise.resolve()
+  ]).then(() => {
+    if (currentPage === "friends") renderFriends();
+  });
+}
+
+function startFriendsRealtimePolling() {
+  if (friendsRealtimeTimer || authState.mode !== "user") return;
+  if (chatSocket?.connected) return;
+  refreshFriendsRealtime();
+  friendsRealtimeTimer = setInterval(() => {
+    if (chatSocket?.connected) {
+      stopFriendsRealtimePolling();
+      return;
+    }
+    refreshFriendsRealtime();
+  }, 5000);
+}
+
+function stopFriendsRealtimePolling() {
+  if (!friendsRealtimeTimer) return;
+  clearInterval(friendsRealtimeTimer);
+  friendsRealtimeTimer = null;
+}
+
+function updateActiveFocusRoom(room) {
+  friendsState.focusRoom = room || null;
+  if (currentPage === "friends") renderFriends();
 }
 
 async function joinDm(friendId) {
@@ -3065,8 +3197,17 @@ async function fetchActiveFocusRoom(friendId) {
   return friendsState.focusRoom;
 }
 
-function pollFocusRoom(friendId) {
+function pollFocusRoom(friendId, once = false) {
   if (!friendId) return;
+  activeFocusFriendId = friendId;
+  if (once) {
+    fetchActiveFocusRoom(friendId).then((room) => {
+      if (friendsState.focusPollFriendId !== friendId && !room) return;
+      renderFocusRoom(room);
+    }).catch(() => {});
+    return;
+  }
+
   stopFocusRoomPolling();
   friendsState.focusPollFriendId = friendId;
   const tick = async () => {
@@ -4180,6 +4321,16 @@ function bindEvents() {
   $("deleteAccountBtn").onclick = handleDeleteAccount;
 
   document.addEventListener("keydown", handleKeyboardShortcuts);
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Tab") {
+      showOnlineFriendsOverlay();
+    }
+  });
+  document.addEventListener("keyup", (event) => {
+    if (event.key === "Tab") {
+      hideOnlineFriendsOverlay();
+    }
+  });
 }
 
 async function init() {
@@ -4392,6 +4543,7 @@ function renderThreadDetail() {
     $("closeThreadBtn").style.display = thread.status === 'open' && thread.author?.id === authState.user?.id ? 'inline-block' : 'none';
   }
 
+  const threadImages = Array.isArray(thread.imageUrls) ? thread.imageUrls : [];
   detail.innerHTML = `
     <div class="thread-content">
       <div class="thread-info">
@@ -4406,11 +4558,12 @@ function renderThreadDetail() {
         </div>
       </div>
       <div class="thread-text">${escapeHtml(thread.content).replace(/\n/g, '<br>')}</div>
-      ${thread.images && thread.images.length > 0 ? `
+      ${threadImages.length ? `
         <div class="thread-image-grid">
-          ${thread.images.map(image => `
-            <img src="${API_BASE}${image.url}" alt="${ui('討論串圖片', 'Thread image')}" onclick="window.open('${API_BASE}${image.url}', '_blank')" />
-          `).join('')}
+          ${threadImages.map((imageUrl) => {
+            const resolved = resolveAssetUrl(imageUrl);
+            return `<a href="${escapeHtml(resolved)}" target="_blank" rel="noopener"><img src="${escapeHtml(resolved)}" alt="${ui('討論串圖片', 'Thread image')}" /></a>`;
+          }).join('')}
         </div>
       ` : ''}
     </div>
@@ -4418,26 +4571,31 @@ function renderThreadDetail() {
 
   replies.classList.remove('hidden');
   const replyList = $("replyList");
-  replyList.innerHTML = thread.replies.map(reply => `
-    <li class="reply-card ${reply.accepted ? 'accepted-reply' : ''}">
-      <div class="reply-header">
-        <span class="reply-author">${escapeHtml(reply.author?.name || ui('匿名', 'Anonymous'))}</span>
-        <span class="reply-date">${new Date(reply.createdAt).toLocaleDateString()}</span>
-        ${reply.accepted ? `<span class="accepted-badge">${ui('最佳解答', 'Accepted Answer')}</span>` : ''}
-        ${thread.author?.id === authState.user?.id && thread.status === 'open' && !reply.accepted ? `
-          <button class="accept-reply-btn small" onclick="acceptThreadReply('${thread.id}', '${reply.id}')">${ui('標記為最佳解答', 'Mark as Accepted')}</button>
-        ` : ''}
-      </div>
-      <div class="reply-content">${escapeHtml(reply.content).replace(/\n/g, '<br>')}</div>
-      ${reply.images && reply.images.length > 0 ? `
-        <div class="reply-image-grid">
-          ${reply.images.map(image => `
-            <img src="${API_BASE}${image.url}" alt="${ui('回覆圖片', 'Reply image')}" onclick="window.open('${API_BASE}${image.url}', '_blank')" />
-          `).join('')}
+  replyList.innerHTML = thread.replies.map((reply) => {
+    const replyImages = Array.isArray(reply.imageUrls) ? reply.imageUrls : [];
+    const isAccepted = reply.id === thread.acceptedReplyId;
+    return `
+      <li class="reply-card ${isAccepted ? 'accepted-reply' : ''}">
+        <div class="reply-header">
+          <span class="reply-author">${escapeHtml(reply.author?.name || ui('匿名', 'Anonymous'))}</span>
+          <span class="reply-date">${new Date(reply.createdAt).toLocaleDateString()}</span>
+          ${isAccepted ? `<span class="accepted-badge">${ui('最佳解答', 'Accepted Answer')}</span>` : ''}
+          ${thread.author?.id === authState.user?.id && thread.status === 'open' && !isAccepted ? `
+            <button class="accept-reply-btn small" onclick="acceptThreadReply('${thread.id}', '${reply.id}')">${ui('標記為最佳解答', 'Mark as Accepted')}</button>
+          ` : ''}
         </div>
-      ` : ''}
-    </li>
-  `).join('');
+        <div class="reply-content">${escapeHtml(reply.content).replace(/\n/g, '<br>')}</div>
+        ${replyImages.length ? `
+          <div class="reply-image-grid">
+            ${replyImages.map((imageUrl) => {
+              const resolved = resolveAssetUrl(imageUrl);
+              return `<a href="${escapeHtml(resolved)}" target="_blank" rel="noopener"><img src="${escapeHtml(resolved)}" alt="${ui('回覆圖片', 'Reply image')}" /></a>`;
+            }).join('')}
+          </div>
+        ` : ''}
+      </li>
+    `;
+  }).join('');
 }
 
 function updateThreadFilters() {

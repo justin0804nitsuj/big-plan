@@ -923,6 +923,68 @@ h3 {
   font-weight: 900;
 }
 
+.online-friends-overlay {
+  position: fixed;
+  inset: 16px auto auto 16px;
+  z-index: 25;
+  display: grid;
+  place-items: start;
+  pointer-events: none;
+}
+
+.online-friends-panel {
+  width: min(320px, calc(100vw - 32px));
+  background: rgba(18, 27, 44, .98);
+  border: 1px solid rgba(255, 255, 255, .12);
+  border-radius: var(--radius);
+  box-shadow: 0 18px 45px rgba(0, 0, 0, .25);
+  color: var(--text);
+  padding: 16px;
+  pointer-events: auto;
+}
+
+.online-friends-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  font-weight: 700;
+}
+
+.online-friends-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 260px;
+  overflow-y: auto;
+  display: grid;
+  gap: 10px;
+}
+
+.online-friend-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, .08);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, .02);
+  gap: 12px;
+}
+
+.online-friend-item.empty-state {
+  border-color: rgba(255, 255, 255, .08);
+  background: rgba(255, 255, 255, .02);
+  color: rgba(255, 255, 255, .72);
+}
+
+.online-friends-hint {
+  margin-top: 12px;
+  font-size: 13px;
+  color: rgba(255, 255, 255, .65);
+}
+
 .modal {
   position: fixed;
   inset: 0;
