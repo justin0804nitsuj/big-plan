@@ -39,6 +39,7 @@ ensureFile(FOCUS_ROOMS_FILE, []);
 ensureFile(GROUPS_FILE, []);
 ensureFile(THREADS_FILE, []);
 ensureFile(THREAD_REPLIES_FILE, []);
+console.log("DATA_DIR:", DATA_DIR);
 
 const allowedOrigins = (process.env.CORS_ORIGIN || "")
   .split(",")
@@ -174,12 +175,11 @@ function normalizeFriendMeta(meta) {
 function normalizeUser(user) {
   const value = user && typeof user === "object" ? user : {};
   return {
-    ...value,
     id: value.id,
-    name: value.name,
-    email: value.email,
+    name: String(value.name || "").trim(),
+    email: String(value.email || "").trim().toLowerCase(),
     passwordHash: value.passwordHash,
-    createdAt: value.createdAt,
+    createdAt: value.createdAt || new Date().toISOString(),
     friends: uniqueStrings(value.friends),
     incomingRequests: uniqueStrings(value.incomingRequests),
     outgoingRequests: uniqueStrings(value.outgoingRequests),
@@ -220,10 +220,13 @@ function getDmRoomId(userIdA, userIdB) {
 function normalizeMessage(message = {}) {
   const senderId = String(message.senderId || "");
   const receiverId = String(message.receiverId || "");
+  const roomId = String(message.roomId || (senderId && receiverId ? getDmRoomId(senderId, receiverId) : ""));
+  const groupId = message.groupId ? String(message.groupId) : (roomId.startsWith("group_") ? roomId.replace(/^group_/, "") : "");
   const type = ["text", "quick", "image"].includes(message.type) ? message.type : "text";
   return {
-    id: message.id || createId("msg"),
-    roomId: message.roomId || (senderId && receiverId ? getDmRoomId(senderId, receiverId) : ""),
+    id: String(message.id || createId("msg")),
+    roomId,
+    groupId: groupId || null,
     senderId,
     receiverId,
     type,
@@ -1686,6 +1689,7 @@ app.post("/auth/register", async (req, res) => {
     saveUsers(users);
     saveUserData(user.id, getEmptyUserData());
 
+    console.log("[auth/register]", email, user.id);
     const token = jwt.sign({ id: user.id }, JWT_SECRET, { expiresIn: "365d" });
     res.json({ user: publicUser(user), token });
   } catch (err) {
@@ -1698,13 +1702,27 @@ app.post("/auth/login", async (req, res) => {
   try {
     const email = String(req.body?.email || "").trim().toLowerCase();
     const password = req.body?.password;
-    if (!validateEmail(email) || !password) return res.status(400).json({ error: "請提供 Email 和密碼" });
+    if (!validateEmail(email) || !password) {
+      console.log("[auth/login failed]", email, "missing credentials");
+      return res.status(400).json({ error: "請提供 Email 和密碼" });
+    }
 
     const user = loadUsers().find((item) => item.email === email);
-    if (!user) return res.status(400).json({ error: "帳號或密碼錯誤" });
+    if (!user) {
+      console.log("[auth/login failed]", email, "user not found");
+      return res.status(400).json({ error: "帳號或密碼錯誤" });
+    }
+
+    if (!user.passwordHash) {
+      console.log("[auth/login failed]", email, "missing passwordHash");
+      return res.status(400).json({ error: "帳號資料不完整，請重新註冊或聯絡管理員" });
+    }
 
     const valid = await bcrypt.compare(password, user.passwordHash);
-    if (!valid) return res.status(400).json({ error: "帳號或密碼錯誤" });
+    if (!valid) {
+      console.log("[auth/login failed]", email, "invalid password");
+      return res.status(400).json({ error: "帳號或密碼錯誤" });
+    }
 
     const token = jwt.sign({ id: user.id }, JWT_SECRET, { expiresIn: "365d" });
     res.json({ user: publicUser(user), token });
@@ -1969,19 +1987,25 @@ app.post("/messages/upload-image", authMiddleware, (req, res) => {
 app.post("/messages/:messageId/delete-for-me", authMiddleware, (req, res) => {
   try {
     const messageId = req.params.messageId;
+    console.log("[message/delete]", messageId, req.userId);
     const messages = loadMessages();
     const message = messages.find(m => m.id === messageId);
-    if (!message) return res.status(404).json({ error: "找不到訊息" });
+    if (!message) {
+      console.log("[delete-for-me] messageId", messageId);
+      console.log("[delete-for-me] known ids", messages.slice(-10).map(m => m.id));
+      return res.status(404).json({ error: "找不到訊息" });
+    }
 
     const canAccess = (message.senderId === req.userId || message.receiverId === req.userId) ||
                       (message.groupId && isGroupMember(getGroupById(message.groupId), req.userId));
     if (!canAccess) return res.status(403).json({ error: "無權限刪除此訊息" });
 
+    message.deletedFor = Array.isArray(message.deletedFor) ? message.deletedFor : [];
     if (!message.deletedFor.includes(req.userId)) {
       message.deletedFor.push(req.userId);
     }
     saveMessages(messages);
-    res.json({ success: true });
+    res.json({ success: true, messageId });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "刪除訊息失敗" });
@@ -1991,9 +2015,14 @@ app.post("/messages/:messageId/delete-for-me", authMiddleware, (req, res) => {
 app.post("/messages/:messageId/recall", authMiddleware, (req, res) => {
   try {
     const messageId = req.params.messageId;
+    console.log("[message/recall]", messageId, req.userId);
     const messages = loadMessages();
     const message = messages.find(m => m.id === messageId);
-    if (!message) return res.status(404).json({ error: "找不到訊息" });
+    if (!message) {
+      console.log("[recall] messageId", messageId);
+      console.log("[recall] known ids", messages.slice(-10).map(m => m.id));
+      return res.status(404).json({ error: "找不到訊息" });
+    }
     if (message.senderId !== req.userId) return res.status(403).json({ error: "只能收回自己的訊息" });
 
     message.recalledAt = new Date().toISOString();
@@ -2002,15 +2031,11 @@ app.post("/messages/:messageId/recall", authMiddleware, (req, res) => {
     saveMessages(messages);
 
     if (message.groupId) {
-      if (typeof io !== "undefined") {
-        io.to("group_" + message.groupId).emit("group:message:recalled", { messageId });
-      }
+      io.to("group_" + message.groupId).emit("group:message:recalled", { messageId });
     } else {
-      if (typeof io !== "undefined") {
-        io.to(message.roomId).emit("message:recalled", { messageId });
-      }
+      io.to(message.roomId).emit("message:recalled", { messageId });
     }
-    res.json({ success: true });
+    res.json({ success: true, messageId });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "收回訊息失敗" });

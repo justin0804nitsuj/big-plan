@@ -2417,7 +2417,7 @@ function connectChatSocket() {
     }
   });
   chatSocket.on("message:recalled", ({ messageId }) => {
-    recallMessage(messageId);
+    applyRecalledDmMessage(messageId);
     renderMessages();
   });
   chatSocket.on("typing:update", ({ userId, typing } = {}) => {
@@ -2504,7 +2504,7 @@ function addOrUpdateMessage(message) {
   friendsState.messages = activeMessages;
 }
 
-function recallMessage(messageId) {
+function applyRecalledDmMessage(messageId) {
   const message = activeMessages.find(m => m.id === messageId);
   if (message) {
     message.recalledAt = new Date().toISOString();
@@ -2756,24 +2756,52 @@ async function fetchFriendRequests() {
   return friendsState.requests;
 }
 
+function removeLocalMessage(messageId) {
+  if (activeGroupId) {
+    activeGroupMessages = activeGroupMessages.filter((message) => message.id !== messageId);
+  } else {
+    activeMessages = activeMessages.filter((message) => message.id !== messageId);
+    friendsState.messages = activeMessages;
+  }
+}
+
 async function deleteMessageForMe(messageId) {
   try {
+    const message = activeGroupId
+      ? activeGroupMessages.find((m) => m.id === messageId)
+      : activeMessages.find((m) => m.id === messageId);
+    console.log("[message action]", "delete-for-me", messageId, message);
     await authenticatedApiRequest(`/messages/${encodeURIComponent(messageId)}/delete-for-me`, {
       method: "POST"
     });
-    // 重新渲染以隱藏訊息
-    renderMessages();
+    removeLocalMessage(messageId);
+    if (activeGroupId) renderGroupMessages();
+    else renderMessages();
   } catch (err) {
     alert(ui(`刪除訊息失敗：${err.message}`, `Delete message failed: ${err.message}`));
   }
 }
 
+function applyRecalledMessage(messageId) {
+  if (activeGroupId) {
+    recallGroupMessage(messageId);
+  } else {
+    applyRecalledDmMessage(messageId);
+  }
+}
+
 async function recallMessage(messageId) {
   try {
+    const message = activeGroupId
+      ? activeGroupMessages.find((m) => m.id === messageId)
+      : activeMessages.find((m) => m.id === messageId);
+    console.log("[message action]", "recall", messageId, message);
     await authenticatedApiRequest(`/messages/${encodeURIComponent(messageId)}/recall`, {
       method: "POST"
     });
-    // 重新渲染會由 socket 事件處理
+    applyRecalledMessage(messageId);
+    if (activeGroupId) renderGroupMessages();
+    else renderMessages();
   } catch (err) {
     alert(ui(`收回訊息失敗：${err.message}`, `Recall message failed: ${err.message}`));
   }
