@@ -2525,16 +2525,24 @@ function updateChatPresenceLabel() {
   label.classList.toggle("online", Boolean(online));
 }
 
-function shouldIgnoreTabOverlay() {
+function shouldIgnoreFriendShortcut() {
   const tag = document.activeElement?.tagName?.toLowerCase();
   return ["input", "textarea", "select"].includes(tag) || document.activeElement?.isContentEditable;
+}
+
+function toggleOnlineFriendsOverlay() {
+  if (isOnlineOverlayVisible) {
+    hideOnlineFriendsOverlay();
+  } else {
+    showOnlineFriendsOverlay();
+  }
 }
 
 function showOnlineFriendsOverlay() {
   if (isOnlineOverlayVisible) return;
   const overlay = $("onlineFriendsOverlay");
   if (!overlay) return;
-  if (shouldIgnoreTabOverlay()) return;
+  if (shouldIgnoreFriendShortcut()) return;
   isOnlineOverlayVisible = true;
   overlay.classList.remove("hidden");
   renderOnlineFriendsOverlay();
@@ -2565,17 +2573,23 @@ function renderOnlineFriendsOverlay() {
   const list = $("onlineFriendsList");
   if (!overlay || !countLabel || !list) return;
 
-  const activeFriends = friendsState.friends.filter((friend) => onlineUserIds.has(friend.id) || friend.online);
-
+  const activeFriends = Array.isArray(onlineFriends) ? onlineFriends : [];
   countLabel.textContent = String(activeFriends.length);
   list.innerHTML = activeFriends.length
-    ? activeFriends.map((friend) => `
-        <li class="online-friend-item">
-          <strong>${escapeHtml(friend.originalName || friend.name)}</strong>
-          <span>${ui("在線中", "Online")}</span>
-        </li>
-      `).join("")
-    : `<li class="online-friend-item empty-state">${ui("目前沒有在線好友。", "No online friends.")}</li>`;
+    ? activeFriends.map((friend) => {
+        const name = escapeHtml(friend.nickname || friend.originalName || friend.name || friend.email || friend.id);
+        const subtitle = escapeHtml(friend.nickname && friend.originalName ? friend.originalName : "");
+        return `
+          <li class="online-friend-item">
+            <div>
+              <span class="friend-name">${name}</span>
+              ${subtitle ? `<span class="friend-subtitle">${subtitle}</span>` : ""}
+            </div>
+            <span class="friend-status">${ui("在線中", "Online")}</span>
+          </li>
+        `;
+      }).join("")
+    : `<li class="online-friend-item empty-state">${ui("目前沒有在線好友", "No online friends")}</li>`;
 }
 
 function refreshFriendsRealtime() {
@@ -4322,14 +4336,11 @@ function bindEvents() {
 
   document.addEventListener("keydown", handleKeyboardShortcuts);
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Tab") {
-      showOnlineFriendsOverlay();
-    }
-  });
-  document.addEventListener("keyup", (event) => {
-    if (event.key === "Tab") {
-      hideOnlineFriendsOverlay();
-    }
+    if (event.key.toLowerCase() !== "f") return;
+    if (event.ctrlKey || event.altKey || event.metaKey) return;
+    if (shouldIgnoreFriendShortcut()) return;
+    event.preventDefault();
+    toggleOnlineFriendsOverlay();
   });
 }
 
